@@ -17,6 +17,7 @@ var (
 	templateName string
 	agentImage   string
 	noAuth       bool
+	attach       bool
 )
 
 // startCmd represents the start command
@@ -36,14 +37,20 @@ The agent will be created from a template and run in a detached container.`,
 
 		fmt.Printf("Starting agent '%s' for task: %s\n", agentName, task)
 
-		// 1. Prepare agent home directory
+		// 1. Prepare agent directories
 		agentsDir, err := config.GetProjectAgentsDir()
 		if err != nil {
 			return err
 		}
-		agentHome := filepath.Join(agentsDir, agentName, "home")
+		agentDir := filepath.Join(agentsDir, agentName)
+		agentHome := filepath.Join(agentDir, "home")
+		agentWorkspace := filepath.Join(agentDir, "workspace")
+
 		if err := os.MkdirAll(agentHome, 0755); err != nil {
 			return fmt.Errorf("failed to create agent home: %w", err)
+		}
+		if err := os.MkdirAll(agentWorkspace, 0755); err != nil {
+			return fmt.Errorf("failed to create agent workspace: %w", err)
 		}
 
 		// 2. Load and copy templates
@@ -79,40 +86,70 @@ The agent will be created from a template and run in a detached container.`,
 		// 3. Propagate credentials
 		var auth config.AuthConfig
 		if !noAuth {
-			auth = config.DiscoverAuth()
+			// Load agent settings from the newly prepared home directory
+			agentSettingsPath := filepath.Join(agentHome, ".gemini", "settings.json")
+			agentSettings, _ := config.LoadGeminiSettings(agentSettingsPath)
+			auth = config.DiscoverAuth(agentSettings)
 		}
 
 		// 4. Launch container
 		rt := runtime.GetRuntime()
+
+		// Determine detached mode from templates (last one wins)
+		detached := true
+		for _, tpl := range chain {
+			tplCfg, err := tpl.LoadConfig()
+			if err == nil {
+				detached = tplCfg.IsDetached()
+			}
+		}
+
+		// If user requested attach, we must run detached first then attach
+		// OR we just run it interactive.
+		// Let's say if attach is requested, we run detached then attach.
+		// If detached is false in config, we run interactive and ignore attach flag.
+		
 		runCfg := runtime.RunConfig{
-			Name:    agentName,
-			Image:   resolvedImage,
-			HomeDir: agentHome,
-			Auth:    auth,
+			Name:      agentName,
+			Image:     resolvedImage,
+			HomeDir:   agentHome,
+			Workspace: agentWorkspace,
+			Auth:      auth,
+			Detached:  detached || attach,
 			Env: []string{
 				fmt.Sprintf("GEMINI_INITIAL_PROMPT=%s", task),
+				fmt.Sprintf("GEMINI_AGENT_NAME=%s", agentName),
 			},
 			Labels: map[string]string{
 				"gswarm.agent": "true",
 				"gswarm.name":  agentName,
 			},
 		}
-		
-				id, err := rt.RunDetached(context.Background(), runCfg)
-					if err != nil {
-						return fmt.Errorf("failed to launch container: %w", err)
-					}
-		
-					fmt.Printf("Agent '%s' launched successfully (ID: %s)\n", agentName, id)
-					return nil
-			},
+
+		id, err := rt.Run(context.Background(), runCfg)
+		if err != nil {
+			return fmt.Errorf("failed to launch container: %w", err)
 		}
-		
-		func init() {
-			rootCmd.AddCommand(startCmd)
-			startCmd.Flags().StringVarP(&agentName, "name", "n", "", "Name of the agent")
-			startCmd.Flags().StringVarP(&templateName, "type", "t", "default", "Template to use")
-				startCmd.Flags().StringVarP(&agentImage, "image", "i", "", "Container image to use (overrides template)")
-				startCmd.Flags().BoolVar(&noAuth, "no-auth", false, "Disable authentication propagation")
-			}
+
+		if runCfg.Detached {
+			fmt.Printf("Agent '%s' launched successfully (ID: %s)\n", agentName, id)
+		}
+
+		if attach && runCfg.Detached {
+			fmt.Printf("Attaching to agent '%s'...\n", agentName)
+			return rt.Attach(context.Background(), id)
+		}
+
+		return nil
+	},
+}
+
+func init() {
+	rootCmd.AddCommand(startCmd)
+	startCmd.Flags().StringVarP(&agentName, "name", "n", "", "Name of the agent")
+	startCmd.Flags().StringVarP(&templateName, "type", "t", "default", "Template to use")
+	startCmd.Flags().StringVarP(&agentImage, "image", "i", "", "Container image to use (overrides template)")
+	startCmd.Flags().BoolVar(&noAuth, "no-auth", false, "Disable authentication propagation")
+	startCmd.Flags().BoolVarP(&attach, "attach", "a", false, "Attach to the agent TTY after starting")
+}
 			
