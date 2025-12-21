@@ -13,7 +13,15 @@ type Template struct {
 }
 
 type GswarmConfig struct {
-	Image string `json:"image"`
+	Image    string `json:"image"`
+	Detached *bool  `json:"detached"`
+}
+
+func (c *GswarmConfig) IsDetached() bool {
+	if c.Detached == nil {
+		return true
+	}
+	return *c.Detached
 }
 
 func (t *Template) LoadConfig() (*GswarmConfig, error) {

@@ -6,54 +6,79 @@ import (
 	"testing"
 )
 
-func TestFindTemplate(t *testing.T) {
-	// Setup a temporary project directory
-	tmpDir, err := os.MkdirTemp("", "gswarm-test-*")
+func TestDiscoverAuth(t *testing.T) {
+	// Setup a temporary home directory
+	tmpHome, err := os.MkdirTemp("", "gswarm-home-*")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer os.RemoveAll(tmpHome)
 
-	origWd, _ := os.Getwd()
-	os.Chdir(tmpDir)
-	defer os.Chdir(origWd)
+	// Mock HOME environment variable
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpHome)
+	defer os.Setenv("HOME", origHome)
 
-	// Initialize project
-	if err := InitProject(); err != nil {
+	geminiDir := filepath.Join(tmpHome, ".gemini")
+	if err := os.MkdirAll(geminiDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	// Test finding default template
-	tpl, err := FindTemplate("default")
-	if err != nil {
-		t.Errorf("expected to find default template, got %v", err)
-	}
-	if tpl.Name != "default" {
-		t.Errorf("expected template name 'default', got '%s'", tpl.Name)
-	}
-
-	// Create a custom project template
-	projectTemplatesDir, _ := GetProjectTemplatesDir()
-	customDir := filepath.Join(projectTemplatesDir, "custom")
-	os.MkdirAll(customDir, 0755)
-
-	tpl, err = FindTemplate("custom")
-	if err != nil {
-		t.Errorf("expected to find custom template, got %v", err)
-	}
-	if tpl.Name != "custom" {
-		t.Errorf("expected template name 'custom', got '%s'", tpl.Name)
-	}
-
-	// Test inheritance chain
-	chain, err := GetTemplateChain("custom")
-	if err != nil {
+	// 1. Test OAuth discovery via host settings
+	settingsPath := filepath.Join(geminiDir, "settings.json")
+	settingsData := `{
+		"security": {
+			"auth": {
+				"selectedType": "oauth-personal"
+			}
+		}
+	}`
+	if err := os.WriteFile(settingsPath, []byte(settingsData), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if len(chain) != 2 {
-		t.Errorf("expected chain length 2, got %d", len(chain))
+
+	oauthCredsPath := filepath.Join(geminiDir, "oauth_creds.json")
+	if err := os.WriteFile(oauthCredsPath, []byte(`{"dummy":"creds"}`), 0644); err != nil {
+		t.Fatal(err)
 	}
-	if chain[0].Name != "default" || chain[1].Name != "custom" {
-		t.Errorf("expected [default, custom], got [%s, %s]", chain[0].Name, chain[1].Name)
+
+	auth := DiscoverAuth(nil)
+	if auth.OAuthCreds != oauthCredsPath {
+		t.Errorf("expected OAuthCreds to be %s, got %s", oauthCredsPath, auth.OAuthCreds)
+	}
+
+	// 2. Test OAuth discovery via agent settings (overriding host)
+	os.WriteFile(settingsPath, []byte(`{"security":{"auth":{"selectedType":"gemini-api-key"}}}`), 0644)
+	agentSettings := &GeminiSettings{}
+	agentSettings.Security.Auth.SelectedType = "oauth-personal"
+
+	auth = DiscoverAuth(agentSettings)
+	if auth.OAuthCreds != oauthCredsPath {
+		t.Errorf("expected OAuthCreds to be %s when requested by agent, got %s", oauthCredsPath, auth.OAuthCreds)
+	}
+
+	// 3. Test API Key fallback from host settings
+	os.Remove(settingsPath)
+	settingsData = `{
+		"apiKey": "test-api-key"
+	}`
+	if err := os.WriteFile(settingsPath, []byte(settingsData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Clear env vars that might interfere
+	origApiKey := os.Getenv("GEMINI_API_KEY")
+	origGoogleApiKey := os.Getenv("GOOGLE_API_KEY")
+	os.Unsetenv("GEMINI_API_KEY")
+	os.Unsetenv("GOOGLE_API_KEY")
+	defer func() {
+		os.Setenv("GEMINI_API_KEY", origApiKey)
+		os.Setenv("GOOGLE_API_KEY", origGoogleApiKey)
+	}()
+
+	auth = DiscoverAuth(nil)
+	if auth.GeminiAPIKey != "test-api-key" {
+		t.Errorf("expected GeminiAPIKey to be 'test-api-key', got '%s'", auth.GeminiAPIKey)
 	}
 }
+

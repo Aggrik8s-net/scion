@@ -7,19 +7,18 @@ import (
 )
 
 type GeminiSettings struct {
-	ApiKey string `json:"apiKey"`
-	Tools  struct {
+	ApiKey   string `json:"apiKey"`
+	Security struct {
+		Auth struct {
+			SelectedType string `json:"selectedType"`
+		} `json:"auth"`
+	} `json:"security"`
+	Tools struct {
 		Sandbox interface{} `json:"sandbox"`
 	} `json:"tools"`
 }
 
-func GetGeminiSettings() (*GeminiSettings, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-
-	path := filepath.Join(home, ".gemini", "settings.json")
+func LoadGeminiSettings(path string) (*GeminiSettings, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -31,4 +30,14 @@ func GetGeminiSettings() (*GeminiSettings, error) {
 	}
 
 	return &settings, nil
+}
+
+func GetGeminiSettings() (*GeminiSettings, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+
+	path := filepath.Join(home, ".gemini", "settings.json")
+	return LoadGeminiSettings(path)
 }

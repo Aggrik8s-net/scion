@@ -7,9 +7,27 @@ import (
 )
 
 const DefaultSettingsJSON = `{
-  "tools": ["*"],
-  "extensions": [],
-  "yolo": true
+  "yolo": true,
+  "security": {
+    "auth": {
+      "selectedType": "gemini-api-key"
+    }
+  },
+	"telemetry": {
+    "enabled": false
+  },
+	"general": {
+    "disableAutoUpdate": true,
+    "disableUpdateNag": true,
+    "previewFeatures": true
+  },
+	"ui": {
+    "accessibility": {
+      "disableLoadingPhrases": true
+    },
+    "hideFooter": true,
+    "hideWindowTitle": true
+  }
 }
 `
 
@@ -63,7 +81,7 @@ func InitProject() error {
 		{filepath.Join(defaultTemplateDir, "gswarm.json"), DefaultGswarmJSON},
 		{filepath.Join(defaultTemplateDir, ".gemini", "settings.json"), DefaultSettingsJSON},
 		{filepath.Join(defaultTemplateDir, ".gemini", "system_prompt.md"), DefaultSystemPrompt},
-		{filepath.Join(defaultTemplateDir, ".gemini", "gemini.md"), DefaultGeminiMD},
+		{filepath.Join(defaultTemplateDir, "gemini.md"), DefaultGeminiMD},
 		{filepath.Join(defaultTemplateDir, ".bashrc"), DefaultBashrc},
 	}
 
@@ -111,7 +129,7 @@ func InitGlobal() error {
 		}
 	}
 
-    // Seed default template files for global as well
+	// Seed default template files for global as well
 	files := []struct {
 		path    string
 		content string

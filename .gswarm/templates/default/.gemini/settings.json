@@ -1,5 +1,10 @@
 {
   "tools": ["*"],
   "extensions": [],
-  "yolo": true
+  "yolo": true,
+  "security": {
+    "auth": {
+      "selectedType": "gemini-api-key"
+    }
+  }
 }
