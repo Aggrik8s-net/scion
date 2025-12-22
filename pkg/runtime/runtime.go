@@ -23,6 +23,7 @@ type RunConfig struct {
 	Auth      config.AuthConfig
 	Detached  bool
 	UseTmux   bool
+	Model     string
 }
 
 type Runtime interface {

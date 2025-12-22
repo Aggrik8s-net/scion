@@ -19,6 +19,7 @@ var (
 	agentImage   string
 	noAuth       bool
 	attach       bool
+	model        string
 )
 
 // startCmd represents the start command
@@ -99,6 +100,7 @@ The agent will be created from a template and run in a detached container.`,
 		// Determine detached mode and tmux from templates (last one wins)
 		detached := true
 		useTmux := false
+		resolvedModel := "flash"
 		for _, tpl := range chain {
 			tplCfg, err := tpl.LoadConfig()
 			if err == nil {
@@ -106,7 +108,14 @@ The agent will be created from a template and run in a detached container.`,
 				if tplCfg.UseTmux {
 					useTmux = true
 				}
+				if tplCfg.Model != "" {
+					resolvedModel = tplCfg.Model
+				}
 			}
+		}
+
+		if model != "" {
+			resolvedModel = model
 		}
 
 		if useTmux {
@@ -138,6 +147,7 @@ The agent will be created from a template and run in a detached container.`,
 			Auth:      auth,
 			Detached:  detached || attach,
 			UseTmux:   useTmux,
+			Model:     resolvedModel,
 			Env: []string{
 				fmt.Sprintf("GEMINI_INITIAL_PROMPT=%s", task),
 				fmt.Sprintf("GEMINI_AGENT_NAME=%s", agentName),
@@ -173,5 +183,6 @@ func init() {
 	startCmd.Flags().StringVarP(&agentImage, "image", "i", "", "Container image to use (overrides template)")
 	startCmd.Flags().BoolVar(&noAuth, "no-auth", false, "Disable authentication propagation")
 	startCmd.Flags().BoolVarP(&attach, "attach", "a", false, "Attach to the agent TTY after starting")
+	startCmd.Flags().StringVarP(&model, "model", "m", "", "Model to use (overrides template)")
 }
 			

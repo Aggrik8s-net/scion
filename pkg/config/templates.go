@@ -16,6 +16,7 @@ type GswarmConfig struct {
 	Image    string `json:"image"`
 	Detached *bool  `json:"detached"`
 	UseTmux  bool   `json:"use_tmux"`
+	Model    string `json:"model"`
 }
 
 func (c *GswarmConfig) IsDetached() bool {

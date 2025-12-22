@@ -87,6 +87,10 @@ func (r *AppleContainerRuntime) Run(ctx context.Context, config RunConfig) (stri
 		args = append(args, "-e", "GEMINI_DEFAULT_AUTH_TYPE=compute-default-credentials")
 	}
 
+	if config.Model != "" {
+		args = append(args, "-e", fmt.Sprintf("GEMINI_MODEL=%s", config.Model))
+	}
+
 	// Mount gcloud config if it exists
 	home, _ := os.UserHomeDir()
 	gcloudConfigDir := filepath.Join(home, ".config", "gcloud")

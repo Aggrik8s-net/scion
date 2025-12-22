@@ -22,5 +22,11 @@ If set to `true`, the agent's main process will be wrapped in a `tmux` session. 
 - **Details**: When enabled, `gswarm` will attempt to use a version of the configured image with a `:tmux` tag if available.
 - **Example**: `"use_tmux": true`
 
+### `model` (string)
+The Gemini model ID to use for the agent.
+- **Default**: `"flash"`
+- **Details**: This value is propagated to the agent container as the `GEMINI_MODEL` environment variable. The value `"flash"` is a special ID recognized by the Gemini CLI as the best available flash model.
+- **Example**: `"model": "pro"`
+
 ## Inheritance
 `gswarm` uses a template inheritance system. Configuration fields are merged from the `default` template, then the specified template type, and finally any overrides in the agent's own directory. The last value defined for a field takes precedence.
