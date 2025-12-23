@@ -26,13 +26,11 @@ func DeleteAgentFiles(agentName string) error {
 		}
 
 		agentWorkspace := filepath.Join(agentDir, "workspace")
-		if util.IsGitRepo() {
-			// Check if it's a worktree before trying to remove it
-			if _, err := os.Stat(filepath.Join(agentWorkspace, ".git")); err == nil {
-				fmt.Printf("Removing git worktree for agent '%s'...\n", agentName)
-				if err := util.RemoveWorktree(agentWorkspace); err != nil {
-					fmt.Printf("Warning: failed to remove worktree at %s: %v\n", agentWorkspace, err)
-				}
+		// Check if it's a worktree before trying to remove it
+		if _, err := os.Stat(filepath.Join(agentWorkspace, ".git")); err == nil {
+			fmt.Printf("Removing git worktree for agent '%s'...\n", agentName)
+			if err := util.RemoveWorktree(agentWorkspace); err != nil {
+				fmt.Printf("Warning: failed to remove worktree at %s: %v\n", agentWorkspace, err)
 			}
 		}
 

@@ -46,7 +46,8 @@ func CreateWorktree(path, branch string) error {
 
 // RemoveWorktree removes a git worktree at the specified path.
 func RemoveWorktree(path string) error {
-	// git worktree remove <path>
-	cmd := exec.Command("git", "worktree", "remove", path, "--force")
+	// Try to remove it by running git from within the worktree itself.
+	// We use "." as the path to remove the worktree we are "in" via -C.
+	cmd := exec.Command("git", "-C", path, "worktree", "remove", ".", "--force")
 	return cmd.Run()
 }
