@@ -56,11 +56,11 @@ This document tracks the evolution of `scion`. It has been updated to reflect th
 
 add a template lifecycle sub-command - working with the default or explicit grove.
 
-- [ ] Template Management Enhancements
-    - [ ] `scion templates new <name>`: Create a new template, cloning the default as a starting point
-    - [ ] `scion templates list`: List available local and global templates.
-    - [ ] `scion templates show <name>`: Inspect template configuration.
-    - [ ] `scion templates delete <name>`: Inspect template configuration.
+- [x] Template Management Enhancements (**Completed**)
+    - [x] `scion templates new <name>`: Create a new template, cloning the default as a starting point
+    - [x] `scion templates list`: List available local and global templates.
+    - [x] `scion templates show <name>`: Inspect template configuration.
+    - [x] `scion templates delete <name>`: Inspect template configuration.
 
 
 ## Milestone 6: Inter-Agent Coordination (Future)

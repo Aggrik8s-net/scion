@@ -91,3 +91,40 @@ func GetTemplateChain(name string) ([]*Template, error) {
 
 	return chain, nil
 }
+
+func ListTemplates() ([]*Template, error) {
+	templates := make(map[string]*Template)
+
+	// Helper to scan a directory for templates
+	scan := func(dir string) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				templates[e.Name()] = &Template{
+					Name: e.Name(),
+					Path: filepath.Join(dir, e.Name()),
+				}
+			}
+		}
+	}
+
+	// 1. Scan global templates (lower precedence in map)
+	if globalDir, err := GetGlobalTemplatesDir(); err == nil {
+		scan(globalDir)
+	}
+
+	// 2. Scan project templates (higher precedence)
+	if projectDir, err := GetProjectTemplatesDir(); err == nil {
+		scan(projectDir)
+	}
+
+	var list []*Template
+	for _, t := range templates {
+		list = append(list, t)
+	}
+	return list, nil
+}
+
