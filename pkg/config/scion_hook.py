@@ -4,8 +4,9 @@ import os
 import tempfile
 from datetime import datetime
 
-SCION_JSON_PATH = "/home/node/scion.json"
-AGENT_LOG_PATH = "/home/node/agent.log"
+HOME = os.path.expanduser("~")
+SCION_JSON_PATH = os.path.join(HOME, "scion.json")
+AGENT_LOG_PATH = os.path.join(HOME, "agent.log")
 
 def log_event(state, message):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

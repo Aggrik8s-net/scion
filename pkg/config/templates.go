@@ -19,11 +19,12 @@ type AgentConfig struct {
 }
 
 type ScionConfig struct {
-	Image    string       `json:"image"`
-	Detached *bool        `json:"detached"`
-	UseTmux  bool         `json:"use_tmux"`
-	Model    string       `json:"model"`
-	Agent    *AgentConfig `json:"agent,omitempty"`
+	UnixUsername string       `json:"unix_username"`
+	Image        string       `json:"image"`
+	Detached     *bool        `json:"detached"`
+	UseTmux      bool         `json:"use_tmux"`
+	Model        string       `json:"model"`
+	Agent        *AgentConfig `json:"agent,omitempty"`
 }
 
 func (c *ScionConfig) IsDetached() bool {

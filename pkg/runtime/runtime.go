@@ -17,16 +17,17 @@ type AgentInfo struct {
 }
 
 type RunConfig struct {
-	Name      string
-	Image     string
-	HomeDir   string
-	Workspace string
-	Env       []string
-	Labels    map[string]string
-	Auth      config.AuthConfig
-	UseTmux   bool
-	Model     string
-	Task      string
+	Name         string
+	UnixUsername string
+	Image        string
+	HomeDir      string
+	Workspace    string
+	Env          []string
+	Labels       map[string]string
+	Auth         config.AuthConfig
+	UseTmux      bool
+	Model        string
+	Task         string
 }
 
 type Runtime interface {

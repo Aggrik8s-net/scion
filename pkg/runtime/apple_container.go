@@ -29,7 +29,7 @@ func (r *AppleContainerRuntime) Run(ctx context.Context, config RunConfig) (stri
 	// container CLI doesn't support --init
 
 	if config.HomeDir != "" {
-		args = append(args, "-v", fmt.Sprintf("%s:/home/node", config.HomeDir))
+		args = append(args, "-v", fmt.Sprintf("%s:/home/%s", config.HomeDir, config.UnixUsername))
 	}
 	if config.Workspace != "" {
 		args = append(args, "-v", fmt.Sprintf("%s:/workspace", config.Workspace))
@@ -58,7 +58,7 @@ func (r *AppleContainerRuntime) Run(ctx context.Context, config RunConfig) (stri
 			}
 		} else {
 			// Fallback to mount if no home dir (might fail on some runtimes)
-			containerPath := "/home/node/.gemini/oauth_creds.json"
+			containerPath := fmt.Sprintf("/home/%s/.gemini/oauth_creds.json", config.UnixUsername)
 			args = append(args, "-v", fmt.Sprintf("%s:%s:ro", config.Auth.OAuthCreds, containerPath))
 		}
 		args = append(args, "-e", "GEMINI_DEFAULT_AUTH_TYPE=oauth-personal")
@@ -67,7 +67,7 @@ func (r *AppleContainerRuntime) Run(ctx context.Context, config RunConfig) (stri
 		args = append(args, "-e", fmt.Sprintf("GOOGLE_CLOUD_PROJECT=%s", config.Auth.GoogleCloudProject))
 	}
 	if config.Auth.GoogleAppCredentials != "" {
-		containerPath := "/home/node/.config/gcp/application_default_credentials.json"
+		containerPath := fmt.Sprintf("/home/%s/.config/gcp/application_default_credentials.json", config.UnixUsername)
 		if config.HomeDir != "" {
 			// Copy ADC file to home dir
 			dst := filepath.Join(config.HomeDir, ".config", "gcp", "application_default_credentials.json")
@@ -90,7 +90,7 @@ func (r *AppleContainerRuntime) Run(ctx context.Context, config RunConfig) (stri
 	home, _ := os.UserHomeDir()
 	gcloudConfigDir := filepath.Join(home, ".config", "gcloud")
 	if _, err := os.Stat(gcloudConfigDir); err == nil {
-		args = append(args, "-v", fmt.Sprintf("%s:/home/node/.config/gcloud:ro", gcloudConfigDir))
+		args = append(args, "-v", fmt.Sprintf("%s:/home/%s/.config/gcloud:ro", gcloudConfigDir, config.UnixUsername))
 	}
 
 	for _, e := range config.Env {

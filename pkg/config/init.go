@@ -37,13 +37,13 @@ const DefaultSettingsJSON = `{
 	    "enableMessageBusIntegration": true
 	},
   "hooks": {
-    "SessionStart": [{"matcher": "*", "hooks": [{"name": "scion-status", "type": "command", "command": "python3 /home/node/scion_hook.py"}]}],
-    "SessionEnd": [{"matcher": "*", "hooks": [{"name": "scion-status", "type": "command", "command": "python3 /home/node/scion_hook.py"}]}],
-    "BeforeAgent": [{"matcher": "*", "hooks": [{"name": "scion-status", "type": "command", "command": "python3 /home/node/scion_hook.py"}]}],
-    "AfterAgent": [{"matcher": "*", "hooks": [{"name": "scion-status", "type": "command", "command": "python3 /home/node/scion_hook.py"}]}],
-    "BeforeTool": [{"matcher": "*", "hooks": [{"name": "scion-status", "type": "command", "command": "python3 /home/node/scion_hook.py"}]}],
-    "AfterTool": [{"matcher": "*", "hooks": [{"name": "scion-status", "type": "command", "command": "python3 /home/node/scion_hook.py"}]}],
-    "Notification": [{"matcher": "ToolPermission", "hooks": [{"name": "scion-status", "type": "command", "command": "python3 /home/node/scion_hook.py"}]}]
+    "SessionStart": [{"matcher": "*", "hooks": [{"name": "scion-status", "type": "command", "command": "python3 $HOME/scion_hook.py"}]}],
+    "SessionEnd": [{"matcher": "*", "hooks": [{"name": "scion-status", "type": "command", "command": "python3 $HOME/scion_hook.py"}]}],
+    "BeforeAgent": [{"matcher": "*", "hooks": [{"name": "scion-status", "type": "command", "command": "python3 $HOME/scion_hook.py"}]}],
+    "AfterAgent": [{"matcher": "*", "hooks": [{"name": "scion-status", "type": "command", "command": "python3 $HOME/scion_hook.py"}]}],
+    "BeforeTool": [{"matcher": "*", "hooks": [{"name": "scion-status", "type": "command", "command": "python3 $HOME/scion_hook.py"}]}],
+    "AfterTool": [{"matcher": "*", "hooks": [{"name": "scion-status", "type": "command", "command": "python3 $HOME/scion_hook.py"}]}],
+    "Notification": [{"matcher": "ToolPermission", "hooks": [{"name": "scion-status", "type": "command", "command": "python3 $HOME/scion_hook.py"}]}]
   }
 }
 `
@@ -53,6 +53,7 @@ const DefaultSystemPrompt = `
 `
 
 const DefaultScionJSON = `{
+  "unix_username": "node",
   "image": "gemini-cli-sandbox",
   "use_tmux": true,
   "model": "flash"

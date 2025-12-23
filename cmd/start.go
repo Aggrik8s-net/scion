@@ -142,10 +142,11 @@ form the task prompt.`,
 		// 4. Launch container
 		rt := runtime.GetRuntime()
 
-		// Determine detached mode and tmux from templates (last one wins)
+		// Determine detached mode, tmux, and username from templates (last one wins)
 		detached := true
 		useTmux := false
 		resolvedModel := "flash"
+		unixUsername := "node"
 		for _, tpl := range chain {
 			tplCfg, err := tpl.LoadConfig()
 			if err == nil {
@@ -155,6 +156,9 @@ form the task prompt.`,
 				}
 				if tplCfg.Model != "" {
 					resolvedModel = tplCfg.Model
+				}
+				if tplCfg.UnixUsername != "" {
+					unixUsername = tplCfg.UnixUsername
 				}
 			}
 		}
@@ -188,19 +192,20 @@ form the task prompt.`,
 			fmt.Sprintf("GEMINI_AGENT_NAME=%s", agentName),
 		}
 		if !strings.HasPrefix(strings.TrimSpace(config.DefaultSystemPrompt), "# Placeholder") {
-			agentEnv = append(agentEnv, "GEMINI_SYSTEM_MD=/home/gemini/.gemini/system_prompt.md")
+			agentEnv = append(agentEnv, fmt.Sprintf("GEMINI_SYSTEM_MD=/home/%s/.gemini/system_prompt.md", unixUsername))
 		}
 
 		runCfg := runtime.RunConfig{
-			Name:      agentName,
-			Image:     resolvedImage,
-			HomeDir:   agentHome,
-			Workspace: agentWorkspace,
-			Auth:      auth,
-			UseTmux:   useTmux,
-			Model:     resolvedModel,
-			Task:      task,
-			Env:       agentEnv,
+			Name:         agentName,
+			UnixUsername: unixUsername,
+			Image:        resolvedImage,
+			HomeDir:      agentHome,
+			Workspace:    agentWorkspace,
+			Auth:         auth,
+			UseTmux:      useTmux,
+			Model:        resolvedModel,
+			Task:         task,
+			Env:          agentEnv,
 			Labels: map[string]string{
 				"scion.agent":      "true",
 				"scion.name":       agentName,
