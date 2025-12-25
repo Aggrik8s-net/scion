@@ -110,4 +110,28 @@ func TestGitUtils(t *testing.T) {
 			t.Errorf("worktree dir still exists after removal")
 		}
 	})
+
+	t.Run("CompareGitVersion", func(t *testing.T) {
+		tests := []struct {
+			version string
+			major   int
+			minor   int
+			wantErr bool
+		}{
+			{"2.47.0", 2, 47, false},
+			{"2.48.0", 2, 47, false},
+			{"3.0.0", 2, 47, false},
+			{"2.46.9", 2, 47, true},
+			{"1.9.0", 2, 47, true},
+			{"2.47.1.windows.1", 2, 47, false},
+			{"invalid", 2, 47, true},
+		}
+
+		for _, tt := range tests {
+			err := CompareGitVersion(tt.version, tt.major, tt.minor)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("CompareGitVersion(%q, %d, %d) error = %v, wantErr %v", tt.version, tt.major, tt.minor, err, tt.wantErr)
+			}
+		}
+	})
 }

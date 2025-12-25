@@ -5,8 +5,10 @@ Copyright © 2025 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
+	"fmt"
 	"os"
 
+	"github.com/ptone/scion-agent/pkg/util"
 	"github.com/spf13/cobra"
 )
 
@@ -27,6 +29,13 @@ sub-agents with isolated identities, credentials, and workspaces.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if globalMode && grovePath == "" {
 			grovePath = "global"
+		}
+
+		if util.IsGitRepo() {
+			if err := util.CheckGitVersion(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
 		}
 	},
 }
