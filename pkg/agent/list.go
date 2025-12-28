@@ -37,10 +37,14 @@ func (m *AgentManager) List(ctx context.Context, filter map[string]string) ([]ap
 	if grovePath != "" {
 		grovesToScan = append(grovesToScan, grovePath)
 	} else if len(filter) == 0 || (len(filter) == 1 && filter["scion.agent"] == "true") {
-		// Default: scan current resolved project dir
+		// Default: scan current resolved project dir and global dir
 		pd, _ := config.GetResolvedProjectDir("")
 		if pd != "" {
 			grovesToScan = append(grovesToScan, pd)
+		}
+		gd, _ := config.GetGlobalDir()
+		if gd != "" && gd != pd {
+			grovesToScan = append(grovesToScan, gd)
 		}
 	}
 

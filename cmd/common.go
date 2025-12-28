@@ -30,6 +30,12 @@ func RunAgent(cmd *cobra.Command, args []string, resume bool) error {
 	// Flag takes ultimate precedence
 	resolvedImage := agentImage
 
+	var detached *bool
+	if cmd.Flags().Changed("attach") {
+		val := !attach
+		detached = &val
+	}
+
 	opts := api.StartOptions{
 		Name:      agentName,
 		Task:      task,
@@ -38,7 +44,7 @@ func RunAgent(cmd *cobra.Command, args []string, resume bool) error {
 		GrovePath: grovePath,
 		Resume:    resume,
 		Model:     model,
-		Detached:  !attach, // CLI behavior: detached unless attach requested
+		Detached:  detached,
 	}
 
 	// We still might want to show some progress in the CLI
@@ -53,7 +59,7 @@ func RunAgent(cmd *cobra.Command, args []string, resume bool) error {
 		return err
 	}
 
-	if attach {
+	if !info.Detached {
 		fmt.Printf("Attaching to agent '%s'...\n", agentName)
 		return rt.Attach(context.Background(), info.ID)
 	}
@@ -67,4 +73,3 @@ func RunAgent(cmd *cobra.Command, args []string, resume bool) error {
 	return nil
 }
 
-	

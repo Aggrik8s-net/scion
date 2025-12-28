@@ -91,6 +91,7 @@ type AgentInfo struct {
 	Status      string // Container status
 	AgentStatus string // Scion agent high-level status
 	Image       string
+	Detached    bool
 }
 
 type StartOptions struct {
@@ -100,7 +101,7 @@ type StartOptions struct {
 	Image     string
 	GrovePath string
 	Env       map[string]string
-	Detached  bool
+	Detached  *bool
 	Resume    bool
 	Model     string
 	Auth      AuthProvider

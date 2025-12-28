@@ -137,8 +137,13 @@ func ProvisionAgent(agentName string, templateName string, agentImage string, gr
 	if agentImage != "" {
 		finalScionCfg.Image = agentImage
 	}
-	agentCfgData, _ := json.MarshalIndent(finalScionCfg, "", "  ")
-	os.WriteFile(filepath.Join(agentHome, "scion.json"), agentCfgData, 0644)
+	agentCfgData, err := json.MarshalIndent(finalScionCfg, "", "  ")
+	if err != nil {
+		return "", "", nil, fmt.Errorf("failed to marshal agent config: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(agentHome, "scion.json"), agentCfgData, 0644); err != nil {
+		return "", "", nil, fmt.Errorf("failed to write agent config: %w", err)
+	}
 
 	// Update .claude.json if it exists
 	if finalScionCfg.HarnessProvider == "claude" {

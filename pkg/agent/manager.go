@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/runtime"
@@ -52,5 +53,5 @@ func (m *AgentManager) Delete(ctx context.Context, agentID string, deleteFiles b
 }
 
 func (m *AgentManager) Watch(ctx context.Context, agentID string) (<-chan api.StatusEvent, error) {
-	return nil, nil
+	return nil, fmt.Errorf("Watch not implemented")
 }

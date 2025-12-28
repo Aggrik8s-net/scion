@@ -25,7 +25,9 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 					return &a, nil
 				}
 				// If it exists but not running, we delete it so we can recreate it
-				_ = m.Runtime.Delete(ctx, a.ID)
+				if err := m.Runtime.Delete(ctx, a.ID); err != nil {
+					return nil, fmt.Errorf("failed to cleanup existing container: %w", err)
+				}
 			}
 		}
 	}
@@ -100,15 +102,21 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 	useTmux := false
 	resolvedModel := "flash"
 	unixUsername := "node"
+	detached := true
 
 	if finalScionCfg != nil {
 		useTmux = finalScionCfg.IsUseTmux()
+		detached = finalScionCfg.IsDetached()
 		if finalScionCfg.Model != "" {
 			resolvedModel = finalScionCfg.Model
 		}
 		if finalScionCfg.UnixUsername != "" {
 			unixUsername = finalScionCfg.UnixUsername
 		}
+	}
+
+	if opts.Detached != nil {
+		detached = *opts.Detached
 	}
 
 	if opts.Model != "" {
@@ -193,15 +201,19 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 	if opts.Resume {
 		status = "resumed"
 	}
-	_ = UpdateAgentStatus(opts.Name, opts.GrovePath, status)
-
-	// Fetch fresh info
-	allAgents, _ := m.Runtime.List(ctx, map[string]string{"scion.name": opts.Name})
-	for _, a := range allAgents {
-		if a.ID == id || a.Name == opts.Name {
-			return &a, nil
+		_ = UpdateAgentStatus(opts.Name, opts.GrovePath, status)
+	
+			// Fetch fresh info
+			allAgents, err := m.Runtime.List(ctx, map[string]string{"scion.name": opts.Name})
+			if err == nil {
+				for _, a := range allAgents {
+					if a.ID == id || a.Name == opts.Name {
+						a.Detached = detached
+						return &a, nil
+					}
+				}
+			}
+		
+			return &api.AgentInfo{ID: id, Name: opts.Name, Status: status, Detached: detached}, nil
 		}
-	}
-
-	return &api.AgentInfo{ID: id, Name: opts.Name, Status: status}, nil
-}
+		
