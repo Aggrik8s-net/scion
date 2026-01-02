@@ -46,18 +46,23 @@ func DeleteAgentFiles(agentName string, grovePath string) error {
 }
 
 func (m *AgentManager) Provision(ctx context.Context, opts api.StartOptions) (*api.ScionConfig, error) {
-	_, _, _, cfg, err := GetAgent(ctx, opts.Name, opts.Template, opts.Image, opts.GrovePath, "created")
+	_, _, _, cfg, err := GetAgent(ctx, opts.Name, opts.Template, opts.Image, opts.GrovePath, opts.Profile, "created")
 	if err == nil {
 		_ = UpdateAgentConfig(opts.Name, opts.GrovePath, "created", m.Runtime.Name(), opts.Profile, "")
 	}
 	return cfg, err
 }
 
-func ProvisionAgent(ctx context.Context, agentName string, templateName string, agentImage string, grovePath string, optionalStatus string) (string, string, *api.ScionConfig, error) {
+func ProvisionAgent(ctx context.Context, agentName string, templateName string, agentImage string, grovePath string, profileName string, optionalStatus string) (string, string, *api.ScionConfig, error) {
 	// 1. Prepare agent directories
 	projectDir, err := config.GetResolvedProjectDir(grovePath)
 	if err != nil {
 		return "", "", nil, err
+	}
+
+	settings, _ := config.LoadSettings(projectDir)
+	if profileName == "" && settings != nil {
+		profileName = settings.ActiveProfile
 	}
 
 	groveName := config.GetGroveName(projectDir)
@@ -126,6 +131,17 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 		}
 	}
 
+	// Merge settings env if available
+	if settings != nil && finalScionCfg.Harness != "" {
+		hConfig, err := settings.ResolveHarness(profileName, finalScionCfg.Harness)
+		if err == nil && hConfig.Env != nil {
+			// Template has highest priority, so it should override settings.
+			// We construct a config with ONLY the settings env, then merge finalScionCfg over it.
+			settingsCfg := &api.ScionConfig{Env: hConfig.Env}
+			finalScionCfg = config.MergeScionConfig(settingsCfg, finalScionCfg)
+		}
+	}
+
 	// Update agent-specific scion-agent.json
 	if finalScionCfg == nil {
 		finalScionCfg = &api.ScionConfig{}
@@ -134,6 +150,7 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 		Grove:         groveName,
 		Name:          agentName,
 		Template:      templateName,
+		Profile:       profileName,
 		SessionStatus: "ACTIVE",
 	}
 	if optionalStatus != "" {
@@ -264,7 +281,7 @@ func UpdateAgentConfig(agentName string, grovePath string, status string, runtim
 	return nil
 }
 
-func GetAgent(ctx context.Context, agentName string, templateName string, agentImage string, grovePath string, optionalStatus string) (string, string, string, *api.ScionConfig, error) {
+func GetAgent(ctx context.Context, agentName string, templateName string, agentImage string, grovePath string, profileName string, optionalStatus string) (string, string, string, *api.ScionConfig, error) {
 	projectDir, err := config.GetResolvedProjectDir(grovePath)
 	if err != nil {
 		return "", "", "", nil, err
@@ -288,7 +305,7 @@ func GetAgent(ctx context.Context, agentName string, templateName string, agentI
 		if templateName == "" {
 			templateName = defaultTemplate
 		}
-		home, ws, cfg, err := ProvisionAgent(ctx, agentName, templateName, agentImage, grovePath, optionalStatus)
+		home, ws, cfg, err := ProvisionAgent(ctx, agentName, templateName, agentImage, grovePath, profileName, optionalStatus)
 		return agentDir, home, ws, cfg, err
 	}
 

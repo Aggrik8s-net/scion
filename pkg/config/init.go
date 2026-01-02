@@ -173,6 +173,10 @@ func InitGlobal() error {
 		return err
 	}
 
+	if err := os.MkdirAll(globalDir, 0755); err != nil {
+		return fmt.Errorf("failed to create global directory: %w", err)
+	}
+
 	// Create global settings file if it doesn't exist
 	settingsPath := filepath.Join(globalDir, "settings.json")
 	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {

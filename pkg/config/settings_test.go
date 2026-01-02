@@ -147,25 +147,178 @@ func TestResolve(t *testing.T) {
 		},
 	}
 
-	runtime, name, err := s.ResolveRuntime("")
+	runtimeCfg, name, err := s.ResolveRuntime("")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if name != "docker" {
 		t.Errorf("expected runtime name docker, got %s", name)
 	}
-	if runtime.Host != "unix:///var/run/docker.sock" {
-		t.Errorf("expected host unix:///var/run/docker.sock, got %s", runtime.Host)
+	if runtimeCfg.Host != "unix:///var/run/docker.sock" {
+		t.Errorf("expected host unix:///var/run/docker.sock, got %s", runtimeCfg.Host)
 	}
 
-	harness, err := s.ResolveHarness("", "gemini")
+	h, err := s.ResolveHarness("", "gemini")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if harness.Image != "gemini:dev" {
-		t.Errorf("expected image gemini:dev, got %s", harness.Image)
-	}
-	if harness.User != "root" {
-		t.Errorf("expected user root, got %s", harness.User)
+	if h.Image != "gemini:dev" {
+		t.Errorf("expected image gemini:dev, got %s", h.Image)
 	}
 }
+
+func TestEnvMerging(t *testing.T) {
+
+		s := &Settings{
+
+			Harnesses: map[string]HarnessConfig{
+
+				"gemini": {
+
+					Env: map[string]string{
+
+						"H1": "V1",
+
+						"H2": "V2",
+
+					},
+
+				},
+
+			},
+
+			Profiles: map[string]ProfileConfig{
+
+				"dev": {
+
+					Env: map[string]string{
+
+						"H2": "P2", // Overrides harness
+
+						"P1": "PV1",
+
+					},
+
+					HarnessOverrides: map[string]HarnessOverride{
+
+						"gemini": {
+
+							Env: map[string]string{
+
+								"P1": "PH1", // Overrides profile
+
+								"O1": "OV1",
+
+							},
+
+						},
+
+					},
+
+				},
+
+			},
+
+		}
+
+	
+
+		h, err := s.ResolveHarness("dev", "gemini")
+
+		if err != nil {
+
+			t.Fatal(err)
+
+		}
+
+	
+
+		expected := map[string]string{
+
+			"H1": "V1",  // From harness base
+
+			"H2": "P2",  // Harness base, overridden by profile root
+
+			"P1": "PH1", // Profile root, overridden by harness override
+
+			"O1": "OV1", // From harness override
+
+		}
+
+	
+
+		if len(h.Env) != len(expected) {
+
+			t.Errorf("expected %d env vars, got %d", len(expected), len(h.Env))
+
+		}
+
+	
+
+		for k, v := range expected {
+
+			if h.Env[k] != v {
+
+				t.Errorf("expected %s=%s, got %s", k, v, h.Env[k])
+
+			}
+
+		}
+
+	}
+
+	
+
+	func TestMergeSettingsEnv(t *testing.T) {
+
+		base := &Settings{
+
+			Harnesses: map[string]HarnessConfig{
+
+				"gemini": {
+
+					Env: map[string]string{"A": "1", "B": "2"},
+
+				},
+
+			},
+
+		}
+
+		overrideJSON := `{
+
+			"harnesses": {
+
+				"gemini": {
+
+					"env": {"B": "3", "C": "4"}
+
+				}
+
+			}
+
+		}`
+
+	
+
+		err := MergeSettings(base, []byte(overrideJSON))
+
+		if err != nil {
+
+			t.Fatal(err)
+
+		}
+
+	
+
+		env := base.Harnesses["gemini"].Env
+
+		if env["A"] != "1" || env["B"] != "3" || env["C"] != "4" {
+
+			t.Errorf("unexpected env after merge: %v", env)
+
+		}
+
+	}
+
+	

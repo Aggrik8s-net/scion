@@ -15,18 +15,21 @@ type RuntimeConfig struct {
 }
 
 type HarnessConfig struct {
-	Image string `json:"image"`
-	User  string `json:"user"`
+	Image string            `json:"image"`
+	User  string            `json:"user"`
+	Env   map[string]string `json:"env,omitempty"`
 }
 
 type HarnessOverride struct {
-	Image string `json:"image,omitempty"`
-	User  string `json:"user,omitempty"`
+	Image string            `json:"image,omitempty"`
+	User  string            `json:"user,omitempty"`
+	Env   map[string]string `json:"env,omitempty"`
 }
 
 type ProfileConfig struct {
 	Runtime          string                     `json:"runtime"`
 	Tmux             *bool                      `json:"tmux,omitempty"`
+	Env              map[string]string          `json:"env,omitempty"`
 	HarnessOverrides map[string]HarnessOverride `json:"harness_overrides,omitempty"`
 }
 
@@ -69,18 +72,42 @@ func (s *Settings) ResolveHarness(profileName, harnessName string) (HarnessConfi
 		return baseHarness, nil
 	}
 
+	result := baseHarness
+
+	// Merge profile-level env
+	if profile.Env != nil {
+		result.Env = mergeMaps(result.Env, profile.Env)
+	}
+
 	if profile.HarnessOverrides != nil {
 		if override, ok := profile.HarnessOverrides[harnessName]; ok {
 			if override.Image != "" {
-				baseHarness.Image = override.Image
+				result.Image = override.Image
 			}
 			if override.User != "" {
-				baseHarness.User = override.User
+				result.User = override.User
+			}
+			if override.Env != nil {
+				result.Env = mergeMaps(result.Env, override.Env)
 			}
 		}
 	}
 
-	return baseHarness, nil
+	return result, nil
+}
+
+func mergeMaps(base, override map[string]string) map[string]string {
+	if override == nil {
+		return base
+	}
+	result := make(map[string]string)
+	for k, v := range base {
+		result[k] = v
+	}
+	for k, v := range override {
+		result[k] = v
+	}
+	return result
 }
 
 // LoadSettings loads and merges settings from the hierarchy.
@@ -183,6 +210,9 @@ func MergeSettings(base *Settings, data []byte) error {
 			if v.User != "" {
 				existing.User = v.User
 			}
+			if v.Env != nil {
+				existing.Env = mergeMaps(existing.Env, v.Env)
+			}
 			base.Harnesses[k] = existing
 		}
 	}
@@ -198,12 +228,25 @@ func MergeSettings(base *Settings, data []byte) error {
 			if v.Tmux != nil {
 				existing.Tmux = v.Tmux
 			}
+			if v.Env != nil {
+				existing.Env = mergeMaps(existing.Env, v.Env)
+			}
 			if v.HarnessOverrides != nil {
 				if existing.HarnessOverrides == nil {
 					existing.HarnessOverrides = make(map[string]HarnessOverride)
 				}
 				for hk, hv := range v.HarnessOverrides {
-					existing.HarnessOverrides[hk] = hv
+					hov := existing.HarnessOverrides[hk]
+					if hv.Image != "" {
+						hov.Image = hv.Image
+					}
+					if hv.User != "" {
+						hov.User = hv.User
+					}
+					if hv.Env != nil {
+						hov.Env = mergeMaps(hov.Env, hv.Env)
+					}
+					existing.HarnessOverrides[hk] = hov
 				}
 			}
 			base.Profiles[k] = existing

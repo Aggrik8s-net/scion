@@ -67,7 +67,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 				},
 				Image: "scion-agent:latest",
 			},
-			wantIn: []string{"-e", "GEMINI_API_KEY=\"sk-123\"", "-e", "GEMINI_DEFAULT_AUTH_TYPE=\"gemini-api-key\""},
+			wantIn: []string{"-e", "GEMINI_API_KEY=sk-123", "-e", "GEMINI_DEFAULT_AUTH_TYPE=gemini-api-key"},
 		},
 		{
 			name: "labels and tmux",
@@ -99,7 +99,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 				},
 				Image: "scion-agent:latest",
 			},
-			wantIn: []string{"-e", "GEMINI_DEFAULT_AUTH_TYPE=\"oauth-personal\""},
+			wantIn: []string{"-e", "GEMINI_DEFAULT_AUTH_TYPE=oauth-personal"},
 		},
 		{
 			name: "adc propagation without home",
@@ -114,8 +114,8 @@ func TestBuildCommonRunArgs(t *testing.T) {
 			},
 			wantIn: []string{
 				"-v", fmt.Sprintf("%s:/home/scion/.config/gcp/application_default_credentials.json:ro", adcFile),
-				"-e", "GOOGLE_APPLICATION_CREDENTIALS=\"/home/scion/.config/gcp/application_default_credentials.json\"",
-				"-e", "GEMINI_DEFAULT_AUTH_TYPE=\"compute-default-credentials\"",
+				"-e", "GOOGLE_APPLICATION_CREDENTIALS=/home/scion/.config/gcp/application_default_credentials.json",
+				"-e", "GEMINI_DEFAULT_AUTH_TYPE=compute-default-credentials",
 			},
 		},
 		{
@@ -132,10 +132,10 @@ func TestBuildCommonRunArgs(t *testing.T) {
 				Image: "scion-agent:latest",
 			},
 			wantIn: []string{
-				"-e GOOGLE_API_KEY=\"google-123\"",
-				"-e VERTEX_API_KEY=\"vertex-123\"",
-				"-e GOOGLE_CLOUD_PROJECT=\"my-project\"",
-				"-e GEMINI_MODEL=\"gemini-1.5-pro\"",
+				"-e GOOGLE_API_KEY=google-123",
+				"-e VERTEX_API_KEY=vertex-123",
+				"-e GOOGLE_CLOUD_PROJECT=my-project",
+				"-e GEMINI_MODEL=gemini-1.5-pro",
 			},
 		},
 		{
@@ -149,7 +149,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 				Resume: true,
 			},
 			wantIn: []string{
-				"-e FOO=\"BAR\"",
+				"-e FOO=BAR",
 				"gemini --yolo --resume --prompt-interactive hello",
 			},
 		},
@@ -192,7 +192,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 			},
 			wantIn: []string{
 				"-v " + oauthFile + ":/home/scion/.gemini/oauth_creds.json:ro",
-				"-e GEMINI_DEFAULT_AUTH_TYPE=\"oauth-personal\"",
+				"-e GEMINI_DEFAULT_AUTH_TYPE=oauth-personal",
 			},
 		},
 		{

@@ -15,7 +15,7 @@
   },
   "harnesses": {
     "gemini": {
-      "image": "gemini-cli-sandbox:golang",
+      "image": "us-central1-docker.pkg.dev/ptone-misc/public-docker/gemini-cli-sandbox",
       "user": "node"
     },
     "claude": {
