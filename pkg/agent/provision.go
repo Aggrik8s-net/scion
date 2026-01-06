@@ -234,6 +234,13 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 		return "", "", nil, fmt.Errorf("harness provisioning failed: %w", err)
 	}
 
+	// Reload config to get harness updates (e.g. Env vars injected by harness)
+	tpl := &config.Template{Path: agentDir}
+	if updatedCfg, err := tpl.LoadConfig(); err == nil {
+		updatedCfg.Info = finalScionCfg.Info // Re-attach info
+		finalScionCfg = updatedCfg
+	}
+
 	return agentHome, agentWorkspace, finalScionCfg, nil
 }
 
