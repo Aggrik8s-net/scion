@@ -1,0 +1,629 @@
+# Runtime Host API Design
+
+## Status
+**Proposed** (v3 - Aligned with Hub API)
+
+## 1. Overview
+
+The **Runtime Host API** is the control plane interface exposed by a Scion Runtime Host (e.g., a Kubernetes cluster or a dedicated Docker server). It allows the **Scion Hub** to remotely manage the lifecycle of agents, workspaces, and executions.
+
+This API effectively exposes the `pkg/agent.Manager` interface over a network boundary, adding authentication, multi-tenancy context, and streaming capabilities for PTY access.
+
+### 1.1. Grove-Centric Architecture
+
+Runtime Hosts interact with the Hub through the **groves they contribute to**. A host does not register itself as a standalone entity; instead, it registers one or more groves via `POST /api/v1/groves/register` on the Hub. This grove registration:
+
+1. Creates or links to an existing grove (identified by git remote URL)
+2. Adds this host as a contributor to the grove
+3. Returns a host token for subsequent authentication
+
+All agent operations on a host are scoped to the groves it contributes to.
+
+### 1.2. Relationship to Hub API
+
+This document describes the **Direct HTTP** interface for Runtime Hosts. The Hub communicates with hosts via two transports:
+
+1. **Direct HTTP** (this API): Hub calls Host endpoints directly. Used when hosts have stable, reachable endpoints (K8s services, cloud VMs).
+
+2. **Control Channel** (Hub API Section 10): Host initiates WebSocket to Hub; commands are serialized over this connection. Used when hosts are behind NAT/firewalls.
+
+Both transports use **identical command semantics**. The Hub selects the transport based on host connectivity:
+- If Host has active control channel → use WebSocket
+- If Host has registered `endpoint` and is reachable → use Direct HTTP
+- Otherwise → return error
+
+### 1.3. Transport & Connectivity
+
+- **Protocol:** HTTP/1.1 (REST) for control operations; WebSocket for streaming (logs, PTY).
+- **Discovery:**
+  - **Direct:** Hub connects to Host IP/DNS (e.g., internal K8s service or public IP).
+  - **Control Channel:** Host establishes persistent WebSocket to Hub; Hub routes requests through this channel (for hosts behind firewalls/NAT).
+
+### 1.4. Operational Modes
+
+The Host runs in one of three modes, affecting API availability:
+
+| Mode | Description | Available Endpoints |
+|------|-------------|---------------------|
+| **Connected** | Hub has full control | All endpoints |
+| **Read-Only** | Host reports status; Hub cannot modify | GET endpoints, `/attach` (optional) |
+| **Solo** | API disabled; managed via CLI only | None |
+
+**Read-Only Mode Disabled Endpoints** (return `405 Method Not Allowed`):
+- `POST /api/v1/agents` (create)
+- `POST /api/v1/agents/{agentId}/start`
+- `POST /api/v1/agents/{agentId}/stop`
+- `POST /api/v1/agents/{agentId}/restart`
+- `DELETE /api/v1/agents/{agentId}`
+- `POST /api/v1/agents/{agentId}/message`
+
+## 2. Authentication & Security
+
+### 2.1. Transport Security
+
+- **Mutual TLS (mTLS):** Preferred for cluster-to-cluster communication.
+- **TLS:** Required for all connections; self-signed certs allowed with explicit trust.
+
+### 2.2. Authentication Methods
+
+| Method | Use Case | Header |
+|--------|----------|--------|
+| **Bearer Token** | Hub → Host requests | `Authorization: Bearer <token>` |
+| **API Token** | Alternate auth | `X-API-Key: <token>` |
+
+The token is generated when the Host registers with the Hub (see Hub API Section 5.3).
+
+### 2.3. Request Signing (Optional)
+
+For additional security, requests can be signed using HMAC:
+- Header: `X-Scion-Signature: sha256=<hmac>`
+- Signature computed over: `timestamp + method + path + body`
+
+## 3. Host Lifecycle & Events
+
+### 3.1. Grove Registration (Host → Hub)
+
+Hosts register **groves** with the Hub, not themselves as standalone entities. On startup or when linking a new grove:
+
+```
+POST {HUB_URL}/api/v1/groves/register
+```
+
+This endpoint:
+1. Creates a new grove or links to an existing one (matched by git remote URL)
+2. Adds this host as a contributor to the grove
+3. Returns a grove ID and host authentication token
+
+See Hub API Section 4.3 for the full request/response format.
+
+### 3.2. Control Channel Connection (Host → Hub)
+
+After registering at least one grove, hosts establish a persistent WebSocket for real-time communication:
+
+```
+WS {HUB_URL}/api/v1/runtime-hosts/connect
+```
+
+See Hub API Section 10 for the control channel protocol.
+
+### 3.3. Heartbeat (Host → Hub)
+
+Hosts report health every 30 seconds. Hub marks host `offline` after 3 missed heartbeats.
+
+```
+POST {HUB_URL}/api/v1/runtime-hosts/{hostId}/heartbeat
+```
+
+```json
+{
+  "status": "online",
+  "resources": {
+    "cpuAvailable": "4",
+    "memoryAvailable": "8Gi",
+    "agentsRunning": 3
+  },
+  "groves": [
+    {
+      "groveId": "grove-xyz",
+      "agentCount": 2,
+      "agents": [
+        {
+          "agentId": "agent-123",
+          "status": "running",
+          "containerStatus": "Up 2 hours"
+        }
+      ]
+    }
+  ]
+}
+```
+
+### 3.4. Event Push (Host → Hub)
+
+Hosts push state changes via the Hub's event endpoint or control channel.
+
+**Via HTTP (if Hub reachable):**
+```
+POST {HUB_URL}/api/v1/runtime-hosts/{hostId}/events
+```
+
+**Via Control Channel:**
+```json
+{
+  "type": "event",
+  "eventId": "evt-uuid",
+  "timestamp": "2025-01-24T10:00:00Z",
+  "event": "agent_status",
+  "payload": {
+    "groveId": "grove-xyz",
+    "agentId": "agent-123",
+    "previousStatus": "provisioning",
+    "status": "running",
+    "reason": "Container started"
+  }
+}
+```
+
+## 4. API Resources (Hub → Host)
+
+Base URL: `https://{host-endpoint}/api/v1`
+
+### 4.1. Agents
+
+#### Agent State Machine
+
+```
+pending → provisioning → starting → running → stopping → stopped
+                                  ↘ error
+```
+
+| State | Description |
+|-------|-------------|
+| `pending` | Received by Host, not yet processing |
+| `provisioning` | Pulling images, creating volumes/PVCs |
+| `starting` | Container created, waiting for ready check |
+| `running` | Healthy and ready |
+| `stopping` | Graceful shutdown in progress |
+| `stopped` | Container exited normally |
+| `error` | Error during lifecycle (e.g., crash loop) |
+
+#### List Agents
+
+Returns agents running on this host.
+
+```
+GET /api/v1/agents
+```
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `groveId` | string | Filter by Grove |
+| `status` | string | Filter by status |
+| `limit` | int | Maximum results (default 50) |
+| `cursor` | string | Pagination cursor |
+
+**Response:** `200 OK`
+```json
+{
+  "agents": [
+    {
+      "id": "uuid",
+      "agentId": "fix-bug",
+      "name": "Fix Authentication Bug",
+      "status": "running",
+      "groveId": "grove-xyz",
+      "containerStatus": "Up 2 hours"
+    }
+  ],
+  "nextCursor": "cursor-xyz",
+  "totalCount": 150
+}
+```
+
+#### Create Agent
+
+Provisions resources and starts an agent. Idempotent based on `requestId`.
+
+```
+POST /api/v1/agents
+```
+
+**Request Body:**
+```json
+{
+  "requestId": "uuid",
+  "agentId": "uuid",
+  "name": "feature-x",
+  "groveId": "grove-xyz",
+  "userId": "user-abc",
+  "config": {
+    "template": "claude",
+    "image": "scion-claude:latest",
+    "homeDir": "/home/scion",
+    "workspace": "/workspace",
+    "repoRoot": "/repo",
+    "env": ["FOO=bar", "BAZ=qux"],
+    "volumes": [
+      {
+        "source": "/host/path",
+        "target": "/container/path",
+        "readOnly": false
+      }
+    ],
+    "labels": {"env": "prod"},
+    "annotations": {},
+    "harness": "claude",
+    "useTmux": true,
+    "task": "Fix the authentication bug",
+    "commandArgs": ["--resume"],
+    "kubernetes": {
+      "namespace": "scion",
+      "resources": {
+        "requests": {"cpu": "1", "memory": "2Gi"},
+        "limits": {"cpu": "2", "memory": "4Gi"}
+      }
+    }
+  },
+  "hubEndpoint": "https://hub.scion.dev",
+  "agentToken": "eyJ..."
+}
+```
+
+**Response:** `201 Created` or `202 Accepted` (if async)
+```json
+{
+  "agent": Agent,
+  "created": true
+}
+```
+
+#### Get Agent Details
+
+```
+GET /api/v1/agents/{agentId}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "id": "uuid",
+  "agentId": "fix-bug",
+  "name": "Fix Authentication Bug",
+  "groveId": "grove-xyz",
+  "userId": "user-abc",
+
+  "status": "running",
+  "statusReason": null,
+  "ready": true,
+  "containerStatus": "Up 2 hours",
+
+  "config": {
+    "image": "scion-claude:latest",
+    "template": "claude",
+    "harness": "claude",
+    "resources": {"cpu": "1", "memory": "2Gi"}
+  },
+
+  "runtime": {
+    "containerId": "abc123def456",
+    "node": "node-1",
+    "startedAt": "2025-01-24T10:00:00Z",
+    "ipAddress": "10.0.1.50"
+  },
+
+  "createdAt": "2025-01-24T09:55:00Z",
+  "updatedAt": "2025-01-24T10:00:00Z"
+}
+```
+
+#### Stop Agent
+
+```
+POST /api/v1/agents/{agentId}/stop
+```
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `timeout` | int | Grace period in seconds (default 30) |
+
+**Response:** `202 Accepted`
+
+#### Start Agent
+
+Resumes a stopped agent.
+
+```
+POST /api/v1/agents/{agentId}/start
+```
+
+**Response:** `202 Accepted`
+
+#### Restart Agent
+
+Convenience for Stop + Start.
+
+```
+POST /api/v1/agents/{agentId}/restart
+```
+
+**Response:** `202 Accepted`
+
+#### Delete Agent
+
+Removes the agent container and optionally cleans up the workspace.
+
+```
+DELETE /api/v1/agents/{agentId}
+```
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `deleteFiles` | bool | Delete workspace files (default false) |
+| `removeBranch` | bool | Remove git branch (default false) |
+
+**Response:** `204 No Content`
+
+### 4.2. Interaction & Execution
+
+#### Send Message
+
+Injects a message into the agent's harness (e.g., via tmux).
+
+```
+POST /api/v1/agents/{agentId}/message
+```
+
+**Request Body:**
+```json
+{
+  "message": "Please fix the failing test.",
+  "interrupt": true
+}
+```
+
+**Response:** `200 OK`
+
+#### Execute Command
+
+Runs a one-off command inside the agent container.
+
+```
+POST /api/v1/agents/{agentId}/exec
+```
+
+**Request Body:**
+```json
+{
+  "command": ["ls", "-la"],
+  "timeout": 30
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "output": "total 24\ndrwxr-xr-x...",
+  "exitCode": 0
+}
+```
+
+#### Attach PTY (WebSocket)
+
+Provides a bidirectional stream for terminal access.
+
+```
+GET /api/v1/agents/{agentId}/attach
+Upgrade: websocket
+```
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `streamId` | string | Hub-assigned stream ID (for multiplexing) |
+
+**Subprotocol:** `scion-pty-v1`
+
+**Message Format:**
+```json
+{
+  "type": "data",
+  "data": "base64-encoded-bytes"
+}
+```
+
+**Resize Message:**
+```json
+{
+  "type": "resize",
+  "cols": 120,
+  "rows": 40
+}
+```
+
+**Stream Close:**
+```json
+{
+  "type": "close",
+  "reason": "client disconnected"
+}
+```
+
+### 4.3. System & Diagnostics
+
+#### Get Logs
+
+```
+GET /api/v1/agents/{agentId}/logs
+```
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `follow` | bool | Stream logs (upgrade to SSE/WS) |
+| `tail` | int | Lines from end (default 100) |
+| `since` | string | RFC3339 timestamp |
+| `timestamps` | bool | Include timestamps |
+
+**Response:**
+- `follow=false`: `200 OK` with `text/plain` body
+- `follow=true`: `200 OK` with chunked transfer or SSE
+
+#### Get Stats
+
+```
+GET /api/v1/agents/{agentId}/stats
+```
+
+**Response:** `200 OK`
+```json
+{
+  "cpuUsagePercent": 0.5,
+  "memoryUsageBytes": 104857600,
+  "memoryLimitBytes": 2147483648,
+  "networkRxBytes": 1024000,
+  "networkTxBytes": 512000
+}
+```
+
+#### Host Health
+
+```
+GET /healthz
+```
+
+**Response:** `200 OK`
+```json
+{
+  "status": "healthy",
+  "version": "1.2.3",
+  "mode": "connected",
+  "agentCount": 5,
+  "uptime": "48h30m"
+}
+```
+
+#### Host Info
+
+```
+GET /api/v1/info
+```
+
+**Response:** `200 OK`
+```json
+{
+  "hostId": "host-abc",
+  "name": "Production K8s East",
+  "version": "1.2.3",
+  "mode": "connected",
+  "type": "kubernetes",
+  "capabilities": {
+    "webPty": true,
+    "sync": true,
+    "attach": true
+  },
+  "supportedHarnesses": ["claude", "gemini"],
+  "resources": {
+    "cpuAvailable": "16",
+    "memoryAvailable": "64Gi",
+    "agentsRunning": 5,
+    "agentsCapacity": 20
+  },
+  "groves": [
+    {
+      "groveId": "grove-xyz",
+      "groveName": "my-project",
+      "gitRemote": "github.com/org/repo",
+      "profiles": ["docker", "k8s-prod"],
+      "agentCount": 3
+    }
+  ]
+}
+```
+
+## 5. Data Structures & Standards
+
+### 5.1. Error Response
+
+All errors return a standardized JSON body:
+
+```json
+{
+  "error": {
+    "code": "agent_not_found",
+    "message": "Agent 'agent-999' not found",
+    "requestId": "req-12345",
+    "details": {
+      "agentId": "agent-999"
+    }
+  }
+}
+```
+
+**Error Codes:**
+| HTTP Status | Code | Description |
+|-------------|------|-------------|
+| 400 | `invalid_request` | Malformed request |
+| 400 | `validation_error` | Validation failed |
+| 401 | `unauthorized` | Missing/invalid auth |
+| 403 | `forbidden` | Insufficient permissions |
+| 404 | `agent_not_found` | Agent not found |
+| 405 | `method_not_allowed` | Operation not allowed in current mode |
+| 409 | `conflict` | Resource conflict |
+| 500 | `internal_error` | Server error |
+
+### 5.2. Type Mappings
+
+| API Concept | Go Type (`pkg/api`) |
+|-------------|---------------------|
+| Agent Config | `StartOptions` / `ScionConfig` |
+| Agent Details | `AgentInfo` |
+| Resources | `K8sResources` |
+| Volume Mount | `VolumeMount` |
+
+### 5.3. Naming Conventions
+
+All JSON fields use **camelCase**:
+- `agentId`, `groveId`, `hostId`
+- `requestId`, `eventId`
+- `createdAt`, `updatedAt`
+
+All status values use **lowercase**:
+- `pending`, `provisioning`, `running`, `stopped`, `error`
+
+## 6. Timeouts & Limits
+
+### 6.1. Command Timeouts
+
+| Operation | Default | Max |
+|-----------|---------|-----|
+| Create Agent | 120s | 300s |
+| Start Agent | 60s | 120s |
+| Stop Agent | 30s | 60s |
+| Delete Agent | 30s | 60s |
+| Exec | 30s | 300s |
+| Attach (open) | 10s | 30s |
+
+### 6.2. Rate Limits
+
+| Endpoint Category | Limit |
+|-------------------|-------|
+| Read operations | 1000/minute |
+| Write operations | 100/minute |
+| Agent creation | 20/minute |
+
+## 7. Implementation Plan
+
+1. **Phase 1:** Define Go interfaces/structs for API models (aligned with Hub API types)
+2. **Phase 2:** Implement Host API Server (wrapping `pkg/agent.Manager`)
+3. **Phase 3:** Implement Hub client for Direct HTTP mode
+4. **Phase 4:** Implement Control Channel adapter (translates WS commands to local API calls)
+
+## 8. References
+
+- **Hub API Specification:** `hub-api.md` (primary reference)
+- **Architecture Overview:** `hosted-architecture.md`
+- **Grove Registration:** Hub API Section 4.3
+- **Control Channel Protocol:** Hub API Section 10
