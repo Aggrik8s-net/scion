@@ -30,7 +30,9 @@ func LoadSettingsKoanf(grovePath string) (*Settings, error) {
 	// 2. Load global settings (~/.scion/settings.yaml or .json)
 	globalDir, _ := GetGlobalDir()
 	if globalDir != "" {
-		loadSettingsFile(k, globalDir)
+		if err := loadSettingsFile(k, globalDir); err != nil {
+			return nil, err
+		}
 	}
 
 	// 3. Load grove settings
@@ -46,7 +48,9 @@ func LoadSettingsKoanf(grovePath string) (*Settings, error) {
 	}
 	// Only load grove settings if it's different from global (avoid double-loading)
 	if effectiveGrovePath != "" && effectiveGrovePath != globalDir {
-		loadSettingsFile(k, effectiveGrovePath)
+		if err := loadSettingsFile(k, effectiveGrovePath); err != nil {
+			return nil, err
+		}
 	}
 
 	// 4. Load environment variables (SCION_ prefix, top-level only)
@@ -99,24 +103,23 @@ func LoadSettingsKoanf(grovePath string) (*Settings, error) {
 }
 
 // loadSettingsFile loads settings from a directory, preferring YAML over JSON
-func loadSettingsFile(k *koanf.Koanf, dir string) {
+func loadSettingsFile(k *koanf.Koanf, dir string) error {
 	yamlPath := filepath.Join(dir, "settings.yaml")
 	ymlPath := filepath.Join(dir, "settings.yml")
 	jsonPath := filepath.Join(dir, "settings.json")
 
 	// Try YAML first (.yaml then .yml)
 	if _, err := os.Stat(yamlPath); err == nil {
-		_ = k.Load(file.Provider(yamlPath), yaml.Parser())
-		return
+		return k.Load(file.Provider(yamlPath), yaml.Parser())
 	}
 	if _, err := os.Stat(ymlPath); err == nil {
-		_ = k.Load(file.Provider(ymlPath), yaml.Parser())
-		return
+		return k.Load(file.Provider(ymlPath), yaml.Parser())
 	}
 	// Fall back to JSON
 	if _, err := os.Stat(jsonPath); err == nil {
-		_ = k.Load(file.Provider(jsonPath), json.Parser())
+		return k.Load(file.Provider(jsonPath), json.Parser())
 	}
+	return nil
 }
 
 // GetDefaultSettingsDataYAML returns the embedded default settings in YAML format.

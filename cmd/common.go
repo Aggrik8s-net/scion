@@ -43,8 +43,8 @@ func CheckHubAvailability(grovePath string) (*HubContext, error) {
 
 	settings, err := config.LoadSettings(grovePath)
 	if err != nil {
-		// If we can't load settings, fall back to local mode
-		return nil, nil
+		// If we can't load settings, return the error
+		return nil, err
 	}
 
 	// Check if hub is explicitly enabled
