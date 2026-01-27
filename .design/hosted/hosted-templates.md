@@ -1061,11 +1061,18 @@ go build -buildvcs=false -o scion ./cmd/scion
 # Start Hub with local storage for testing
 ./scion server start --enable-hub --dev-auth --storage-dir /tmp/scion-storage
 
-# Or with GCS storage (requires credentials)
-# ./scion server start --enable-hub --dev-auth --storage-bucket your-bucket-name
+# Or with GCS storage (requires GOOGLE_APPLICATION_CREDENTIALS)
+./scion server start --enable-hub --dev-auth --storage-bucket your-bucket-name
+
+# Combined with runtime host for full testing
+./scion server start --enable-hub --enable-runtime-host --dev-auth --storage-bucket your-bucket-name
 
 TOKEN=$(cat ~/.scion/dev-token)
 ```
+
+**Storage Flags:**
+- `--storage-bucket <name>`: Use GCS bucket for template storage (requires GCP credentials)
+- `--storage-dir <path>`: Use local filesystem directory for template storage (alternative to GCS)
 
 ### A.3. CLI Template Commands Walkthrough
 

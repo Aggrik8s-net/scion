@@ -18,6 +18,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/hub"
 	"github.com/ptone/scion-agent/pkg/runtime"
 	"github.com/ptone/scion-agent/pkg/runtimehost"
+	"github.com/ptone/scion-agent/pkg/storage"
 	"github.com/ptone/scion-agent/pkg/store"
 	"github.com/ptone/scion-agent/pkg/store/sqlite"
 	"github.com/spf13/cobra"
@@ -36,6 +37,8 @@ var (
 	dbURL             string
 	enableDevAuth     bool
 	enableDebug       bool
+	storageBucket     string
+	storageDir        string
 )
 
 // serverCmd represents the server command
@@ -227,6 +230,33 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 
 		// Create Hub server
 		hubSrv = hub.New(hubCfg, s)
+
+		// Initialize storage if configured
+		if storageBucket != "" {
+			log.Printf("Initializing GCS storage with bucket: %s", storageBucket)
+			storageCfg := storage.Config{
+				Provider: storage.ProviderGCS,
+				Bucket:   storageBucket,
+			}
+			stor, err := storage.New(ctx, storageCfg)
+			if err != nil {
+				return fmt.Errorf("failed to initialize GCS storage: %w", err)
+			}
+			hubSrv.SetStorage(stor)
+			log.Printf("GCS storage configured: gs://%s", storageBucket)
+		} else if storageDir != "" {
+			log.Printf("Initializing local storage at: %s", storageDir)
+			storageCfg := storage.Config{
+				Provider:  storage.ProviderLocal,
+				LocalPath: storageDir,
+			}
+			stor, err := storage.New(ctx, storageCfg)
+			if err != nil {
+				return fmt.Errorf("failed to initialize local storage: %w", err)
+			}
+			hubSrv.SetStorage(stor)
+			log.Printf("Local storage configured: %s", storageDir)
+		}
 
 		log.Printf("Starting Hub API server on %s:%d", cfg.Hub.Host, cfg.Hub.Port)
 		log.Printf("Database: %s (%s)", cfg.Database.Driver, cfg.Database.URL)
@@ -656,4 +686,8 @@ func init() {
 
 	// Debug flags
 	serverStartCmd.Flags().BoolVar(&enableDebug, "debug", false, "Enable debug logging (verbose output)")
+
+	// Storage flags
+	serverStartCmd.Flags().StringVar(&storageBucket, "storage-bucket", "", "GCS bucket name for template storage")
+	serverStartCmd.Flags().StringVar(&storageDir, "storage-dir", "", "Local directory for template storage (alternative to GCS)")
 }
