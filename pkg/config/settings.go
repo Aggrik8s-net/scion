@@ -746,6 +746,12 @@ func (s *Settings) IsHubEnabled() bool {
 	return s.Hub != nil && s.Hub.Enabled != nil && *s.Hub.Enabled
 }
 
+// IsHubExplicitlyDisabled returns true if Hub integration is explicitly disabled.
+// Returns false if not configured (nil) or enabled.
+func (s *Settings) IsHubExplicitlyDisabled() bool {
+	return s.Hub != nil && s.Hub.Enabled != nil && !*s.Hub.Enabled
+}
+
 // IsHubLocalOnly returns true if the grove is configured for local-only mode.
 // When true, Hub sync checks will error with guidance to use --no-hub.
 func (s *Settings) IsHubLocalOnly() bool {

@@ -140,6 +140,11 @@ func promptHubRegistration(isGlobal bool) error {
 		return nil // No Hub endpoint configured, skip
 	}
 
+	// Skip if Hub is explicitly disabled
+	if settings.IsHubExplicitlyDisabled() {
+		return nil
+	}
+
 	// Prompt for registration
 	if hubsync.ShowInitRegistrationPrompt(autoConfirm) {
 		// Create Hub client and register

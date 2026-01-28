@@ -362,6 +362,78 @@ func TestVolumeMerging(t *testing.T) {
 	}
 }
 
+func TestHubMethods(t *testing.T) {
+	trueBool := true
+	falseBool := false
+
+	tests := []struct {
+		name                     string
+		hub                      *HubClientConfig
+		wantConfigured           bool
+		wantEnabled              bool
+		wantExplicitlyDisabled   bool
+	}{
+		{
+			name:                     "nil hub",
+			hub:                      nil,
+			wantConfigured:           false,
+			wantEnabled:              false,
+			wantExplicitlyDisabled:   false,
+		},
+		{
+			name:                     "empty hub",
+			hub:                      &HubClientConfig{},
+			wantConfigured:           false,
+			wantEnabled:              false,
+			wantExplicitlyDisabled:   false,
+		},
+		{
+			name:                     "hub with endpoint only",
+			hub:                      &HubClientConfig{Endpoint: "https://hub.example.com"},
+			wantConfigured:           true,
+			wantEnabled:              false,
+			wantExplicitlyDisabled:   false,
+		},
+		{
+			name:                     "hub with endpoint and enabled=true",
+			hub:                      &HubClientConfig{Endpoint: "https://hub.example.com", Enabled: &trueBool},
+			wantConfigured:           true,
+			wantEnabled:              true,
+			wantExplicitlyDisabled:   false,
+		},
+		{
+			name:                     "hub with endpoint and enabled=false",
+			hub:                      &HubClientConfig{Endpoint: "https://hub.example.com", Enabled: &falseBool},
+			wantConfigured:           true,
+			wantEnabled:              false,
+			wantExplicitlyDisabled:   true,
+		},
+		{
+			name:                     "hub with enabled=false but no endpoint",
+			hub:                      &HubClientConfig{Enabled: &falseBool},
+			wantConfigured:           false,
+			wantEnabled:              false,
+			wantExplicitlyDisabled:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Settings{Hub: tt.hub}
+
+			if got := s.IsHubConfigured(); got != tt.wantConfigured {
+				t.Errorf("IsHubConfigured() = %v, want %v", got, tt.wantConfigured)
+			}
+			if got := s.IsHubEnabled(); got != tt.wantEnabled {
+				t.Errorf("IsHubEnabled() = %v, want %v", got, tt.wantEnabled)
+			}
+			if got := s.IsHubExplicitlyDisabled(); got != tt.wantExplicitlyDisabled {
+				t.Errorf("IsHubExplicitlyDisabled() = %v, want %v", got, tt.wantExplicitlyDisabled)
+			}
+		})
+	}
+}
+
 func TestExpansion(t *testing.T) {
 	os.Setenv("TEST_EXP_VAR", "expanded_value")
 	os.Setenv("TEST_EXP_KEY", "EXP_KEY")
