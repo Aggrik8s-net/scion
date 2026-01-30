@@ -18,6 +18,8 @@ web/dist/
 docs-site/node_modules/
 docs-site/dist/
 docs-site/.astro/
+docs-site/.env
+docs-site/.env.production
 web/.env
 web/.env.local
 web/.env.*.local
