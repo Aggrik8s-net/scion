@@ -96,6 +96,15 @@ if ! gcloud iam service-accounts describe "${SERVICE_ACCOUNT_EMAIL}" &>/dev/null
     gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
         --member "serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
         --role "roles/iam.serviceAccountTokenCreator" > /dev/null
+    
+    # Also grant the service account token creator role on ITSELF - required for signBlob via metadata server
+    # TODO: Investigate if this is strictly necessary or if the project-level binding above 
+    # is sufficient after propagation delay. Added to resolve persistent 403s.
+    gcloud iam service-accounts add-iam-policy-binding "${SERVICE_ACCOUNT_EMAIL}" \
+        --member "serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
+        --role "roles/iam.serviceAccountTokenCreator" \
+        --project "${PROJECT_ID}" > /dev/null
+
     gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
         --member "serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
         --role "roles/dns.admin" > /dev/null
