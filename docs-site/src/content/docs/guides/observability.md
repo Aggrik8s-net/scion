@@ -3,5 +3,153 @@ title: Observability
 description: Monitoring agents with logs and metrics.
 ---
 
-<!-- Placeholder for Observability content as per AGENTS.md meta-guide. -->
-<!-- This file should cover agent logs and monitoring. -->
+Scion provides comprehensive observability for agent containers through the `sciontool` telemetry pipeline. This guide covers how to monitor agent activity, collect logs, and integrate with observability platforms.
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────┐
+│           Agent Container               │
+│                                         │
+│  ┌─────────────┐                       │
+│  │   Agent     │ OTLP                  │
+│  │  (Claude/   │───────┐               │
+│  │   Gemini)   │       │               │
+│  └─────────────┘       │               │
+│                        ▼               │
+│              ┌─────────────────┐       │
+│              │   sciontool     │       │
+│              │   telemetry     │       │
+│              │   pipeline      │       │
+│              └────────┬────────┘       │
+│                       │                │
+└───────────────────────┼────────────────┘
+                        │
+                        ▼
+              ┌─────────────────┐
+              │  Cloud Backend  │
+              │  (GCP, OTLP)    │
+              └─────────────────┘
+```
+
+## Agent Logs
+
+Agent logs are written to `~/agent.log` inside the container. The sciontool logging system writes to both stderr and this file.
+
+### Log Levels
+
+- **INFO**: Normal operational events
+- **ERROR**: Critical failures
+- **DEBUG**: Detailed information (enabled with `SCION_DEBUG=true`)
+
+### Log Format
+
+```
+2026-02-05 10:30:00 [sciontool] [INFO] Telemetry pipeline started (gRPC: 4317, HTTP: 4318)
+2026-02-05 10:30:01 [sciontool] [INFO] Running pre-start hooks...
+```
+
+### Viewing Logs
+
+From inside the container:
+
+```bash
+tail -f ~/agent.log
+```
+
+From the host (if volume mounted):
+
+```bash
+tail -f /path/to/agent-home/agent.log
+```
+
+## Telemetry Collection
+
+The telemetry pipeline in sciontool collects and forwards OpenTelemetry (OTLP) data from agents. See the [Metrics & OpenTelemetry guide](/guides/metrics) for configuration details.
+
+### What's Collected
+
+| Data Type | Source | Description |
+|-----------|--------|-------------|
+| Traces | Agent OTLP | Span data for tool calls, API requests |
+| Lifecycle Events | sciontool | Pre-start, post-start, pre-stop, session-end |
+| Status Updates | sciontool | Agent state changes |
+
+### Privacy Controls
+
+By default, user prompts (`agent.user.prompt`) are excluded from telemetry to protect privacy. See [Privacy Filtering](/guides/metrics#privacy-filtering) for customization.
+
+## Integration Points
+
+### Google Cloud
+
+For GCP deployments, sciontool can forward telemetry to:
+
+- **Cloud Trace**: Distributed tracing for agent operations
+- **Cloud Logging**: Centralized log aggregation
+
+See [Metrics & OpenTelemetry - Google Cloud](/guides/metrics#google-cloud) for setup.
+
+### Self-Hosted Collectors
+
+For on-premise or multi-cloud deployments, forward to any OTLP-compatible collector:
+
+```bash
+export SCION_OTEL_ENDPOINT="otel-collector.internal:4317"
+```
+
+## Monitoring Agent Health
+
+### Status Files
+
+Agents maintain status in `~/agent-info.json`:
+
+```json
+{
+  "status": "running",
+  "startedAt": "2026-02-05T10:30:00Z",
+  "lastActivity": "2026-02-05T10:35:00Z"
+}
+```
+
+### Hub Integration (Hosted Mode)
+
+In hosted mode, agents report status to the Scion Hub via heartbeats. The Hub tracks:
+
+- Agent status (starting, running, idle, stopping)
+- Session metrics (token counts, tool usage)
+- Error counts
+
+## Troubleshooting
+
+### Agent Not Producing Logs
+
+1. Check that the agent home directory exists and is writable
+2. Verify the agent process is running
+3. Check for permission issues on the log file
+
+### Telemetry Not Forwarding
+
+1. Verify `SCION_TELEMETRY_ENABLED=true`
+2. Check `SCION_OTEL_ENDPOINT` is set correctly
+3. Look for error messages in agent logs:
+   ```
+   [sciontool] ERROR: Failed to start telemetry: ...
+   ```
+
+### High Telemetry Volume
+
+Use filtering to reduce volume:
+
+```bash
+# Only forward specific event types
+export SCION_TELEMETRY_FILTER_INCLUDE="agent.session.start,agent.session.end"
+
+# Or exclude high-volume events
+export SCION_TELEMETRY_FILTER_EXCLUDE="agent.tool.result,gen_ai.api.request"
+```
+
+## Related Guides
+
+- [Metrics & OpenTelemetry](/guides/metrics) - Detailed telemetry configuration
+- [Hub Server](/guides/hub-server) - Hub integration for hosted mode

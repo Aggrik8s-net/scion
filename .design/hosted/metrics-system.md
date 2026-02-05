@@ -1,7 +1,7 @@
 # Hosted Scion Metrics System Design
 
 ## Status
-**Draft** - Initial design, pending iteration
+**In Progress** - Milestone 1 (Telemetry Foundation) complete. Milestones 2-4 pending.
 
 ## 1. Overview
 
@@ -829,20 +829,52 @@ telemetry:
 
 ## 12. Engineering Milestones
 
-### Milestone 1: Telemetry Foundation (Sciontool)
+### Milestone 1: Telemetry Foundation (Sciontool) ✅ COMPLETE
 
 **Goal:** Enable `sciontool` to accept OTLP data and forward it to the Google Cloud backend.
 
+**Status:** Completed 2026-02-05
+
 **Deliverables:**
-- [ ] **OTLP Receiver**: Embedded receiver in `sciontool` listening on default ports (4317/4318).
-- [ ] **Cloud Forwarder**: Exporter for Google Cloud Trace/Monitoring/Logging.
-- [ ] **Configuration**: `telemetry` config block parsing and environment variable injection.
-- [ ] **Basic Filtering**: Implementation of include/exclude logic for event types.
+- [x] **OTLP Receiver**: Embedded receiver in `sciontool` listening on default ports (4317/4318).
+- [x] **Cloud Forwarder**: Exporter for Google Cloud Trace/Monitoring/Logging.
+- [x] **Configuration**: `telemetry` config block parsing and environment variable injection.
+- [x] **Basic Filtering**: Implementation of include/exclude logic for event types.
 
 **Test Criteria:**
 - `sciontool` starts without errors with telemetry enabled.
 - Can send dummy OTLP data (via `otel-cli` or similar) to localhost:4317.
 - Dummy data appears in Google Cloud Console (Trace/Log Viewer).
+
+#### Implementation Notes
+
+**Package Structure:** `pkg/sciontool/telemetry/`
+
+| File | Description |
+|------|-------------|
+| `config.go` | Configuration loading from env vars (SCION_TELEMETRY_*, SCION_OTEL_*) |
+| `filter.go` | Include/exclude filtering with privacy default (agent.user.prompt excluded) |
+| `exporter.go` | OTLP gRPC/HTTP exporter with raw proto forwarding |
+| `receiver.go` | Embedded OTLP gRPC (4317) and HTTP (4318) receivers |
+| `pipeline.go` | Main orchestration: Start/Stop lifecycle, span handler |
+| `*_test.go` | Unit tests for config, filter, and pipeline |
+
+**Key Design Decisions:**
+
+1. **Environment-first configuration**: Follows `hub/client.go` pattern with `SCION_*` env vars.
+2. **Non-blocking startup**: Telemetry failures log errors but don't block agent startup.
+3. **Privacy default**: `agent.user.prompt` excluded by default.
+4. **Raw proto forwarding**: Uses `ExportProtoSpans()` to forward OTLP data directly without SDK span conversion (avoids `ReadOnlySpan` private method constraint).
+5. **Graceful shutdown**: 5-second timeout for telemetry flush on shutdown.
+
+**Integration Point:** `cmd/sciontool/commands/init.go`
+- Pipeline starts after `setupHostUser()` and before lifecycle hooks.
+- Deferred shutdown ensures flush before container exit.
+
+**Dependencies Added:**
+- `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc`
+- `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp`
+- `go.opentelemetry.io/proto/otlp` (upgraded to v1.9.0)
 
 ### Milestone 2: Harness Data & Log Bridge
 
