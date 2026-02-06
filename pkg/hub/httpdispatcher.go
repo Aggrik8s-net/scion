@@ -45,9 +45,9 @@ func NewHTTPRuntimeBrokerClientWithDebug(debug bool) *HTTPRuntimeBrokerClient {
 // CreateAgent creates an agent on a remote runtime broker.
 // Note: brokerID is unused in this unauthenticated client but is part of the
 // RuntimeBrokerClient interface for compatibility with AuthenticatedBrokerClient.
-func (c *HTTPRuntimeBrokerClient) CreateAgent(ctx context.Context, brokerID, hostEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
+func (c *HTTPRuntimeBrokerClient) CreateAgent(ctx context.Context, brokerID, brokerEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
 	_ = brokerID // Unused in unauthenticated client
-	endpoint := fmt.Sprintf("%s/api/v1/agents", strings.TrimSuffix(hostEndpoint, "/"))
+	endpoint := fmt.Sprintf("%s/api/v1/agents", strings.TrimSuffix(brokerEndpoint, "/"))
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -85,9 +85,9 @@ func (c *HTTPRuntimeBrokerClient) CreateAgent(ctx context.Context, brokerID, hos
 
 // StartAgent starts an agent on a remote runtime broker.
 // Note: brokerID is unused in this unauthenticated client.
-func (c *HTTPRuntimeBrokerClient) StartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
+func (c *HTTPRuntimeBrokerClient) StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
 	_ = brokerID // Unused in unauthenticated client
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/start", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
+	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/start", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
 
 	if c.debug {
 		slog.Debug("Dispatcher request", "method", "POST", "endpoint", endpoint)
@@ -114,9 +114,9 @@ func (c *HTTPRuntimeBrokerClient) StartAgent(ctx context.Context, brokerID, host
 
 // StopAgent stops an agent on a remote runtime broker.
 // Note: brokerID is unused in this unauthenticated client.
-func (c *HTTPRuntimeBrokerClient) StopAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
+func (c *HTTPRuntimeBrokerClient) StopAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
 	_ = brokerID // Unused in unauthenticated client
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/stop", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
+	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/stop", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
 
 	if c.debug {
 		slog.Debug("Dispatcher request", "method", "POST", "endpoint", endpoint)
@@ -143,9 +143,9 @@ func (c *HTTPRuntimeBrokerClient) StopAgent(ctx context.Context, brokerID, hostE
 
 // RestartAgent restarts an agent on a remote runtime broker.
 // Note: brokerID is unused in this unauthenticated client.
-func (c *HTTPRuntimeBrokerClient) RestartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
+func (c *HTTPRuntimeBrokerClient) RestartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
 	_ = brokerID // Unused in unauthenticated client
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/restart", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
+	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/restart", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
 
 	if c.debug {
 		slog.Debug("Dispatcher request", "method", "POST", "endpoint", endpoint)
@@ -172,10 +172,10 @@ func (c *HTTPRuntimeBrokerClient) RestartAgent(ctx context.Context, brokerID, ho
 
 // DeleteAgent deletes an agent from a remote runtime broker.
 // Note: brokerID is unused in this unauthenticated client.
-func (c *HTTPRuntimeBrokerClient) DeleteAgent(ctx context.Context, brokerID, hostEndpoint, agentID string, deleteFiles, removeBranch bool) error {
+func (c *HTTPRuntimeBrokerClient) DeleteAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string, deleteFiles, removeBranch bool) error {
 	_ = brokerID // Unused in unauthenticated client
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s?deleteFiles=%t&removeBranch=%t",
-		strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID), deleteFiles, removeBranch)
+		strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID), deleteFiles, removeBranch)
 
 	if c.debug {
 		slog.Debug("Dispatcher request", "method", "DELETE", "endpoint", endpoint)
@@ -202,9 +202,9 @@ func (c *HTTPRuntimeBrokerClient) DeleteAgent(ctx context.Context, brokerID, hos
 
 // MessageAgent sends a message to an agent on a remote runtime broker.
 // Note: brokerID is unused in this unauthenticated client.
-func (c *HTTPRuntimeBrokerClient) MessageAgent(ctx context.Context, brokerID, hostEndpoint, agentID, message string, interrupt bool) error {
+func (c *HTTPRuntimeBrokerClient) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, message string, interrupt bool) error {
 	_ = brokerID // Unused in unauthenticated client
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/message", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
+	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/message", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
 
 	body, err := json.Marshal(map[string]interface{}{
 		"message":   message,

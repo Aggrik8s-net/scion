@@ -137,7 +137,7 @@ type Server struct {
 	hydrator  *templatecache.Hydrator
 
 	// Authentication and heartbeat
-	hostAuthMiddleware *BrokerAuthMiddleware
+	brokerAuthMiddleware *BrokerAuthMiddleware
 	heartbeat          *HeartbeatService
 	brokerCredentials    *brokercredentials.BrokerCredentials
 
@@ -241,7 +241,7 @@ func (s *Server) initHubIntegration() error {
 
 	// Set up broker auth middleware if enabled and we have credentials
 	if s.config.BrokerAuthEnabled && len(secretKey) > 0 {
-		s.hostAuthMiddleware = NewBrokerAuthMiddleware(BrokerAuthConfig{
+		s.brokerAuthMiddleware = NewBrokerAuthMiddleware(BrokerAuthConfig{
 			Enabled:              true,
 			MaxClockSkew:         5 * time.Minute,
 			SecretKey:            secretKey,
@@ -518,10 +518,10 @@ func (s *Server) checkAndReloadCredentials(ctx context.Context) error {
 	s.mu.Unlock()
 
 	// Check if broker ID or secret key changed (requiring service restart)
-	hostIDChanged := oldCredentials == nil || oldCredentials.BrokerID != creds.BrokerID
+	brokerIDChanged := oldCredentials == nil || oldCredentials.BrokerID != creds.BrokerID
 	secretKeyChanged := oldCredentials == nil || oldCredentials.SecretKey != creds.SecretKey
 
-	if hostIDChanged || secretKeyChanged {
+	if brokerIDChanged || secretKeyChanged {
 		if err := s.reinitializeHubServices(ctx, creds); err != nil {
 			slog.Error("Failed to reinitialize services", "error", err)
 			return err
@@ -650,8 +650,8 @@ func (s *Server) applyMiddleware(h http.Handler) http.Handler {
 		h = s.corsMiddleware(h)
 	}
 	// Apply broker auth middleware if configured
-	if s.hostAuthMiddleware != nil {
-		h = s.hostAuthMiddleware.Middleware(h)
+	if s.brokerAuthMiddleware != nil {
+		h = s.brokerAuthMiddleware.Middleware(h)
 	}
 	return h
 }

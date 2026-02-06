@@ -105,8 +105,8 @@ func (c *AuthenticatedBrokerClient) doRequest(ctx context.Context, brokerID, met
 }
 
 // CreateAgent creates an agent on a remote runtime broker with HMAC authentication.
-func (c *AuthenticatedBrokerClient) CreateAgent(ctx context.Context, brokerID, hostEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
-	endpoint := fmt.Sprintf("%s/api/v1/agents", strings.TrimSuffix(hostEndpoint, "/"))
+func (c *AuthenticatedBrokerClient) CreateAgent(ctx context.Context, brokerID, brokerEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
+	endpoint := fmt.Sprintf("%s/api/v1/agents", strings.TrimSuffix(brokerEndpoint, "/"))
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -133,8 +133,8 @@ func (c *AuthenticatedBrokerClient) CreateAgent(ctx context.Context, brokerID, h
 }
 
 // StartAgent starts an agent on a remote runtime broker with HMAC authentication.
-func (c *AuthenticatedBrokerClient) StartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/start", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
+func (c *AuthenticatedBrokerClient) StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
+	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/start", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
 
 	resp, err := c.doRequest(ctx, brokerID, http.MethodPost, endpoint, nil)
 	if err != nil {
@@ -151,8 +151,8 @@ func (c *AuthenticatedBrokerClient) StartAgent(ctx context.Context, brokerID, ho
 }
 
 // StopAgent stops an agent on a remote runtime broker with HMAC authentication.
-func (c *AuthenticatedBrokerClient) StopAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/stop", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
+func (c *AuthenticatedBrokerClient) StopAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
+	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/stop", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
 
 	resp, err := c.doRequest(ctx, brokerID, http.MethodPost, endpoint, nil)
 	if err != nil {
@@ -169,8 +169,8 @@ func (c *AuthenticatedBrokerClient) StopAgent(ctx context.Context, brokerID, hos
 }
 
 // RestartAgent restarts an agent on a remote runtime broker with HMAC authentication.
-func (c *AuthenticatedBrokerClient) RestartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/restart", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
+func (c *AuthenticatedBrokerClient) RestartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
+	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/restart", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
 
 	resp, err := c.doRequest(ctx, brokerID, http.MethodPost, endpoint, nil)
 	if err != nil {
@@ -187,9 +187,9 @@ func (c *AuthenticatedBrokerClient) RestartAgent(ctx context.Context, brokerID, 
 }
 
 // DeleteAgent deletes an agent from a remote runtime broker with HMAC authentication.
-func (c *AuthenticatedBrokerClient) DeleteAgent(ctx context.Context, brokerID, hostEndpoint, agentID string, deleteFiles, removeBranch bool) error {
+func (c *AuthenticatedBrokerClient) DeleteAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string, deleteFiles, removeBranch bool) error {
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s?deleteFiles=%t&removeBranch=%t",
-		strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID), deleteFiles, removeBranch)
+		strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID), deleteFiles, removeBranch)
 
 	resp, err := c.doRequest(ctx, brokerID, http.MethodDelete, endpoint, nil)
 	if err != nil {
@@ -206,8 +206,8 @@ func (c *AuthenticatedBrokerClient) DeleteAgent(ctx context.Context, brokerID, h
 }
 
 // MessageAgent sends a message to an agent on a remote runtime broker with HMAC authentication.
-func (c *AuthenticatedBrokerClient) MessageAgent(ctx context.Context, brokerID, hostEndpoint, agentID, message string, interrupt bool) error {
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/message", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
+func (c *AuthenticatedBrokerClient) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, message string, interrupt bool) error {
+	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/message", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
 
 	body, err := json.Marshal(map[string]interface{}{
 		"message":   message,

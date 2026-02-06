@@ -29,7 +29,7 @@ type BrokerAuthMetrics struct {
 	dispatchFailures atomic.Int64
 
 	// Connected hosts gauge
-	connectedHosts atomic.Int64
+	connectedBrokers atomic.Int64
 
 	// Latency tracking (simple histogram buckets)
 	mu               sync.RWMutex
@@ -84,7 +84,7 @@ type MetricsSnapshot struct {
 	DispatchFailures int64 `json:"dispatchFailures"`
 
 	// Connected hosts
-	ConnectedHosts int64 `json:"connectedHosts"`
+	ConnectedBrokers int64 `json:"connectedBrokers"`
 
 	// Latency percentiles (in milliseconds)
 	AuthLatencyP50 float64 `json:"authLatencyP50Ms,omitempty"`
@@ -149,7 +149,7 @@ func (m *BrokerAuthMetrics) RecordDispatch(brokerID string, operation string, su
 
 // SetConnectedBrokers sets the current number of connected hosts.
 func (m *BrokerAuthMetrics) SetConnectedBrokers(count int64) {
-	m.connectedHosts.Store(count)
+	m.connectedBrokers.Store(count)
 }
 
 // GetSnapshot returns a snapshot of current metrics.
@@ -165,7 +165,7 @@ func (m *BrokerAuthMetrics) GetSnapshot() *MetricsSnapshot {
 		Rotations:        m.rotations.Load(),
 		DispatchAttempts: m.dispatchAttempts.Load(),
 		DispatchFailures: m.dispatchFailures.Load(),
-		ConnectedHosts:   m.connectedHosts.Load(),
+		ConnectedBrokers:   m.connectedBrokers.Load(),
 	}
 
 	// Calculate latency percentiles

@@ -43,10 +43,10 @@ type mockRuntimeBrokerClient struct {
 	returnErr      error
 }
 
-func (m *mockRuntimeBrokerClient) CreateAgent(ctx context.Context, brokerID, hostEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
+func (m *mockRuntimeBrokerClient) CreateAgent(ctx context.Context, brokerID, brokerEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
 	m.createCalled = true
 	m.lastBrokerID = brokerID
-	m.lastEndpoint = hostEndpoint
+	m.lastEndpoint = brokerEndpoint
 	if m.returnErr != nil {
 		return nil, m.returnErr
 	}
@@ -62,44 +62,44 @@ func (m *mockRuntimeBrokerClient) CreateAgent(ctx context.Context, brokerID, hos
 	}, nil
 }
 
-func (m *mockRuntimeBrokerClient) StartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
+func (m *mockRuntimeBrokerClient) StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
 	m.startCalled = true
 	m.lastBrokerID = brokerID
-	m.lastEndpoint = hostEndpoint
+	m.lastEndpoint = brokerEndpoint
 	m.lastAgentID = agentID
 	return m.returnErr
 }
 
-func (m *mockRuntimeBrokerClient) StopAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
+func (m *mockRuntimeBrokerClient) StopAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
 	m.stopCalled = true
 	m.lastBrokerID = brokerID
-	m.lastEndpoint = hostEndpoint
+	m.lastEndpoint = brokerEndpoint
 	m.lastAgentID = agentID
 	return m.returnErr
 }
 
-func (m *mockRuntimeBrokerClient) RestartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
+func (m *mockRuntimeBrokerClient) RestartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
 	m.restartCalled = true
 	m.lastBrokerID = brokerID
-	m.lastEndpoint = hostEndpoint
+	m.lastEndpoint = brokerEndpoint
 	m.lastAgentID = agentID
 	return m.returnErr
 }
 
-func (m *mockRuntimeBrokerClient) DeleteAgent(ctx context.Context, brokerID, hostEndpoint, agentID string, deleteFiles, removeBranch bool) error {
+func (m *mockRuntimeBrokerClient) DeleteAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string, deleteFiles, removeBranch bool) error {
 	m.deleteCalled = true
 	m.lastBrokerID = brokerID
-	m.lastEndpoint = hostEndpoint
+	m.lastEndpoint = brokerEndpoint
 	m.lastAgentID = agentID
 	m.lastDeleteOpts.deleteFiles = deleteFiles
 	m.lastDeleteOpts.removeBranch = removeBranch
 	return m.returnErr
 }
 
-func (m *mockRuntimeBrokerClient) MessageAgent(ctx context.Context, brokerID, hostEndpoint, agentID, message string, interrupt bool) error {
+func (m *mockRuntimeBrokerClient) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, message string, interrupt bool) error {
 	m.messageCalled = true
 	m.lastBrokerID = brokerID
-	m.lastEndpoint = hostEndpoint
+	m.lastEndpoint = brokerEndpoint
 	m.lastAgentID = agentID
 	m.lastMessage = message
 	m.lastInterrupt = interrupt

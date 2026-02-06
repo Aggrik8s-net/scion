@@ -483,11 +483,11 @@ func (m *ControlChannelManager) ListConnectedBrokers() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	hosts := make([]string, 0, len(m.connections))
+	brokers := make([]string, 0, len(m.connections))
 	for brokerID := range m.connections {
-		hosts = append(hosts, brokerID)
+		brokers = append(brokers, brokerID)
 	}
-	return hosts
+	return brokers
 }
 
 // Shutdown closes all connections and stops the manager.

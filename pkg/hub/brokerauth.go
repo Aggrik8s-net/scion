@@ -255,7 +255,7 @@ func (s *BrokerAuthService) CompleteBrokerJoin(ctx context.Context, req BrokerJo
 	}
 
 	// Store the broker secret
-	hostSecret := &store.BrokerSecret{
+	brokerSecret := &store.BrokerSecret{
 		BrokerID:    req.BrokerID,
 		SecretKey: secretKey,
 		Algorithm: store.BrokerSecretAlgorithmHMACSHA256,
@@ -263,7 +263,7 @@ func (s *BrokerAuthService) CompleteBrokerJoin(ctx context.Context, req BrokerJo
 		Status:    store.BrokerSecretStatusActive,
 	}
 
-	if err := s.store.CreateBrokerSecret(ctx, hostSecret); err != nil {
+	if err := s.store.CreateBrokerSecret(ctx, brokerSecret); err != nil {
 		return nil, fmt.Errorf("failed to store broker secret: %w", err)
 	}
 
@@ -315,7 +315,7 @@ func (s *BrokerAuthService) GenerateAndStoreSecret(ctx context.Context, brokerID
 	}
 
 	// Store the broker secret
-	hostSecret := &store.BrokerSecret{
+	brokerSecret := &store.BrokerSecret{
 		BrokerID:    brokerID,
 		SecretKey: secretKey,
 		Algorithm: store.BrokerSecretAlgorithmHMACSHA256,
@@ -323,7 +323,7 @@ func (s *BrokerAuthService) GenerateAndStoreSecret(ctx context.Context, brokerID
 		Status:    store.BrokerSecretStatusActive,
 	}
 
-	if err := s.store.CreateBrokerSecret(ctx, hostSecret); err != nil {
+	if err := s.store.CreateBrokerSecret(ctx, brokerSecret); err != nil {
 		return "", fmt.Errorf("failed to store broker secret: %w", err)
 	}
 
@@ -385,7 +385,7 @@ func (s *BrokerAuthService) ValidateBrokerSignature(ctx context.Context, r *http
 	}
 
 	// Get the host's secret
-	hostSecret, err := s.store.GetBrokerSecret(ctx, brokerID)
+	brokerSecret, err := s.store.GetBrokerSecret(ctx, brokerID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, fmt.Errorf("unknown host: %s", brokerID)
@@ -394,18 +394,18 @@ func (s *BrokerAuthService) ValidateBrokerSignature(ctx context.Context, r *http
 	}
 
 	// Check if secret is active
-	if hostSecret.Status != store.BrokerSecretStatusActive {
-		return nil, fmt.Errorf("broker secret is %s", hostSecret.Status)
+	if brokerSecret.Status != store.BrokerSecretStatusActive {
+		return nil, fmt.Errorf("broker secret is %s", brokerSecret.Status)
 	}
 
 	// Check expiry
-	if !hostSecret.ExpiresAt.IsZero() && time.Now().After(hostSecret.ExpiresAt) {
+	if !brokerSecret.ExpiresAt.IsZero() && time.Now().After(brokerSecret.ExpiresAt) {
 		return nil, errors.New("broker secret has expired")
 	}
 
 	// Build canonical string and verify signature
 	canonicalString := s.buildCanonicalString(r, timestamp, nonce)
-	expectedSig := computeHMAC(hostSecret.SecretKey, canonicalString)
+	expectedSig := computeHMAC(brokerSecret.SecretKey, canonicalString)
 	expectedSigB64 := base64.StdEncoding.EncodeToString(expectedSig)
 
 	if !hmac.Equal([]byte(signature), []byte(expectedSigB64)) {

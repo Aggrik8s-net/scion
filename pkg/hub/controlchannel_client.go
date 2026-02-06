@@ -26,8 +26,8 @@ func NewControlChannelBrokerClient(manager *ControlChannelManager, debug bool) *
 }
 
 // CreateAgent creates an agent via control channel.
-func (c *ControlChannelBrokerClient) CreateAgent(ctx context.Context, brokerID, hostEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
-	_ = hostEndpoint // Unused - we tunnel through control channel
+func (c *ControlChannelBrokerClient) CreateAgent(ctx context.Context, brokerID, brokerEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
+	_ = brokerEndpoint // Unused - we tunnel through control channel
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -48,32 +48,32 @@ func (c *ControlChannelBrokerClient) CreateAgent(ctx context.Context, brokerID, 
 }
 
 // StartAgent starts an agent via control channel.
-func (c *ControlChannelBrokerClient) StartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
-	_ = hostEndpoint
+func (c *ControlChannelBrokerClient) StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
+	_ = brokerEndpoint
 	path := fmt.Sprintf("/api/v1/agents/%s/start", agentID)
 	_, err := c.doRequest(ctx, brokerID, "POST", path, "", nil)
 	return err
 }
 
 // StopAgent stops an agent via control channel.
-func (c *ControlChannelBrokerClient) StopAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
-	_ = hostEndpoint
+func (c *ControlChannelBrokerClient) StopAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
+	_ = brokerEndpoint
 	path := fmt.Sprintf("/api/v1/agents/%s/stop", agentID)
 	_, err := c.doRequest(ctx, brokerID, "POST", path, "", nil)
 	return err
 }
 
 // RestartAgent restarts an agent via control channel.
-func (c *ControlChannelBrokerClient) RestartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
-	_ = hostEndpoint
+func (c *ControlChannelBrokerClient) RestartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
+	_ = brokerEndpoint
 	path := fmt.Sprintf("/api/v1/agents/%s/restart", agentID)
 	_, err := c.doRequest(ctx, brokerID, "POST", path, "", nil)
 	return err
 }
 
 // DeleteAgent deletes an agent via control channel.
-func (c *ControlChannelBrokerClient) DeleteAgent(ctx context.Context, brokerID, hostEndpoint, agentID string, deleteFiles, removeBranch bool) error {
-	_ = hostEndpoint
+func (c *ControlChannelBrokerClient) DeleteAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string, deleteFiles, removeBranch bool) error {
+	_ = brokerEndpoint
 	path := fmt.Sprintf("/api/v1/agents/%s", agentID)
 	query := fmt.Sprintf("deleteFiles=%t&removeBranch=%t", deleteFiles, removeBranch)
 	resp, err := c.doRequest(ctx, brokerID, "DELETE", path, query, nil)
@@ -88,8 +88,8 @@ func (c *ControlChannelBrokerClient) DeleteAgent(ctx context.Context, brokerID, 
 }
 
 // MessageAgent sends a message to an agent via control channel.
-func (c *ControlChannelBrokerClient) MessageAgent(ctx context.Context, brokerID, hostEndpoint, agentID, message string, interrupt bool) error {
-	_ = hostEndpoint
+func (c *ControlChannelBrokerClient) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, message string, interrupt bool) error {
+	_ = brokerEndpoint
 	path := fmt.Sprintf("/api/v1/agents/%s/message", agentID)
 
 	body, err := json.Marshal(map[string]interface{}{
@@ -149,49 +149,49 @@ func (c *HybridBrokerClient) useControlChannel(brokerID string) bool {
 }
 
 // CreateAgent creates an agent, preferring control channel.
-func (c *HybridBrokerClient) CreateAgent(ctx context.Context, brokerID, hostEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
+func (c *HybridBrokerClient) CreateAgent(ctx context.Context, brokerID, brokerEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
 	if c.useControlChannel(brokerID) {
-		return c.controlChannel.CreateAgent(ctx, brokerID, hostEndpoint, req)
+		return c.controlChannel.CreateAgent(ctx, brokerID, brokerEndpoint, req)
 	}
-	return c.httpClient.CreateAgent(ctx, brokerID, hostEndpoint, req)
+	return c.httpClient.CreateAgent(ctx, brokerID, brokerEndpoint, req)
 }
 
 // StartAgent starts an agent, preferring control channel.
-func (c *HybridBrokerClient) StartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
+func (c *HybridBrokerClient) StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
 	if c.useControlChannel(brokerID) {
-		return c.controlChannel.StartAgent(ctx, brokerID, hostEndpoint, agentID)
+		return c.controlChannel.StartAgent(ctx, brokerID, brokerEndpoint, agentID)
 	}
-	return c.httpClient.StartAgent(ctx, brokerID, hostEndpoint, agentID)
+	return c.httpClient.StartAgent(ctx, brokerID, brokerEndpoint, agentID)
 }
 
 // StopAgent stops an agent, preferring control channel.
-func (c *HybridBrokerClient) StopAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
+func (c *HybridBrokerClient) StopAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
 	if c.useControlChannel(brokerID) {
-		return c.controlChannel.StopAgent(ctx, brokerID, hostEndpoint, agentID)
+		return c.controlChannel.StopAgent(ctx, brokerID, brokerEndpoint, agentID)
 	}
-	return c.httpClient.StopAgent(ctx, brokerID, hostEndpoint, agentID)
+	return c.httpClient.StopAgent(ctx, brokerID, brokerEndpoint, agentID)
 }
 
 // RestartAgent restarts an agent, preferring control channel.
-func (c *HybridBrokerClient) RestartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
+func (c *HybridBrokerClient) RestartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
 	if c.useControlChannel(brokerID) {
-		return c.controlChannel.RestartAgent(ctx, brokerID, hostEndpoint, agentID)
+		return c.controlChannel.RestartAgent(ctx, brokerID, brokerEndpoint, agentID)
 	}
-	return c.httpClient.RestartAgent(ctx, brokerID, hostEndpoint, agentID)
+	return c.httpClient.RestartAgent(ctx, brokerID, brokerEndpoint, agentID)
 }
 
 // DeleteAgent deletes an agent, preferring control channel.
-func (c *HybridBrokerClient) DeleteAgent(ctx context.Context, brokerID, hostEndpoint, agentID string, deleteFiles, removeBranch bool) error {
+func (c *HybridBrokerClient) DeleteAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string, deleteFiles, removeBranch bool) error {
 	if c.useControlChannel(brokerID) {
-		return c.controlChannel.DeleteAgent(ctx, brokerID, hostEndpoint, agentID, deleteFiles, removeBranch)
+		return c.controlChannel.DeleteAgent(ctx, brokerID, brokerEndpoint, agentID, deleteFiles, removeBranch)
 	}
-	return c.httpClient.DeleteAgent(ctx, brokerID, hostEndpoint, agentID, deleteFiles, removeBranch)
+	return c.httpClient.DeleteAgent(ctx, brokerID, brokerEndpoint, agentID, deleteFiles, removeBranch)
 }
 
 // MessageAgent sends a message to an agent, preferring control channel.
-func (c *HybridBrokerClient) MessageAgent(ctx context.Context, brokerID, hostEndpoint, agentID, message string, interrupt bool) error {
+func (c *HybridBrokerClient) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, message string, interrupt bool) error {
 	if c.useControlChannel(brokerID) {
-		return c.controlChannel.MessageAgent(ctx, brokerID, hostEndpoint, agentID, message, interrupt)
+		return c.controlChannel.MessageAgent(ctx, brokerID, brokerEndpoint, agentID, message, interrupt)
 	}
-	return c.httpClient.MessageAgent(ctx, brokerID, hostEndpoint, agentID, message, interrupt)
+	return c.httpClient.MessageAgent(ctx, brokerID, brokerEndpoint, agentID, message, interrupt)
 }

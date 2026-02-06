@@ -1071,7 +1071,7 @@ func (s *SQLiteStore) CreateRuntimeBroker(ctx context.Context, broker *store.Run
 func (s *SQLiteStore) GetRuntimeBroker(ctx context.Context, id string) (*store.RuntimeBroker, error) {
 	broker := &store.RuntimeBroker{}
 	var capabilities, profiles, labels, annotations string
-	var hostType, harnesses, resources string // unused columns kept for schema compatibility
+	var brokerType, harnesses, resources string // unused columns kept for schema compatibility
 	var lastHeartbeat sql.NullTime
 
 	err := s.db.QueryRowContext(ctx, `
@@ -1082,7 +1082,7 @@ func (s *SQLiteStore) GetRuntimeBroker(ctx context.Context, id string) (*store.R
 			created_at, updated_at
 		FROM runtime_brokers WHERE id = ?
 	`, id).Scan(
-		&broker.ID, &broker.Name, &broker.Slug, &hostType, &broker.Mode, &broker.Version,
+		&broker.ID, &broker.Name, &broker.Slug, &brokerType, &broker.Mode, &broker.Version,
 		&broker.Status, &broker.ConnectionState, &lastHeartbeat,
 		&capabilities, &harnesses, &resources, &profiles,
 		&labels, &annotations, &broker.Endpoint,
@@ -1220,11 +1220,11 @@ func (s *SQLiteStore) ListRuntimeBrokers(ctx context.Context, filter store.Runti
 	for rows.Next() {
 		var broker store.RuntimeBroker
 		var capabilities, profiles, labels, annotations string
-		var hostType, harnesses, resources string // unused columns kept for schema compatibility
+		var brokerType, harnesses, resources string // unused columns kept for schema compatibility
 		var lastHeartbeat sql.NullTime
 
 		if err := rows.Scan(
-			&broker.ID, &broker.Name, &broker.Slug, &hostType, &broker.Mode, &broker.Version,
+			&broker.ID, &broker.Name, &broker.Slug, &brokerType, &broker.Mode, &broker.Version,
 			&broker.Status, &broker.ConnectionState, &lastHeartbeat,
 			&capabilities, &harnesses, &resources, &profiles,
 			&labels, &annotations, &broker.Endpoint,

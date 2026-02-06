@@ -125,27 +125,27 @@ type AgentDispatcher interface {
 type RuntimeBrokerClient interface {
 	// CreateAgent creates an agent on a remote runtime broker.
 	// brokerID is used for HMAC authentication lookup.
-	CreateAgent(ctx context.Context, brokerID, hostEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error)
+	CreateAgent(ctx context.Context, brokerID, brokerEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error)
 
 	// StartAgent starts an agent on a remote runtime broker.
 	// brokerID is used for HMAC authentication lookup.
-	StartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error
+	StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error
 
 	// StopAgent stops an agent on a remote runtime broker.
 	// brokerID is used for HMAC authentication lookup.
-	StopAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error
+	StopAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error
 
 	// RestartAgent restarts an agent on a remote runtime broker.
 	// brokerID is used for HMAC authentication lookup.
-	RestartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error
+	RestartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error
 
 	// DeleteAgent deletes an agent from a remote runtime broker.
 	// brokerID is used for HMAC authentication lookup.
-	DeleteAgent(ctx context.Context, brokerID, hostEndpoint, agentID string, deleteFiles, removeBranch bool) error
+	DeleteAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string, deleteFiles, removeBranch bool) error
 
 	// MessageAgent sends a message to an agent on a remote runtime broker.
 	// brokerID is used for HMAC authentication lookup.
-	MessageAgent(ctx context.Context, brokerID, hostEndpoint, agentID, message string, interrupt bool) error
+	MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, message string, interrupt bool) error
 }
 
 // RemoteCreateAgentRequest is the request body for creating an agent on a remote runtime broker.

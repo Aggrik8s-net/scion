@@ -25,7 +25,7 @@ type HealthResponse struct {
 }
 
 type HealthStats struct {
-	ConnectedHosts int `json:"connectedHosts,omitempty"`
+	ConnectedBrokers int `json:"connectedBrokers,omitempty"`
 	ActiveAgents   int `json:"activeAgents,omitempty"`
 	Groves         int `json:"groves,omitempty"`
 }
@@ -53,8 +53,8 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	if groveResult, err := s.store.ListGroves(r.Context(), store.GroveFilter{}, store.ListOptions{Limit: 1}); err == nil {
 		stats.Groves = groveResult.TotalCount
 	}
-	if hostResult, err := s.store.ListRuntimeBrokers(r.Context(), store.RuntimeBrokerFilter{Status: store.BrokerStatusOnline}, store.ListOptions{Limit: 1}); err == nil {
-		stats.ConnectedHosts = hostResult.TotalCount
+	if brokerResult, err := s.store.ListRuntimeBrokers(r.Context(), store.RuntimeBrokerFilter{Status: store.BrokerStatusOnline}, store.ListOptions{Limit: 1}); err == nil {
+		stats.ConnectedBrokers = brokerResult.TotalCount
 	}
 
 	status := "healthy"
