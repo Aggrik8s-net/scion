@@ -43,7 +43,7 @@ func TestHostRegistrationAndJoin(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a host registration
-	req := CreateHostRegistrationRequest{
+	req := CreateBrokerRegistrationRequest{
 		Name: "test-host",
 		Labels: map[string]string{
 			"env": "test",
@@ -109,7 +109,7 @@ func TestJoinWithInvalidToken(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a host registration
-	req := CreateHostRegistrationRequest{Name: "test-host"}
+	req := CreateBrokerRegistrationRequest{Name: "test-host"}
 	resp, err := svc.CreateHostRegistration(ctx, req, "admin")
 	if err != nil {
 		t.Fatalf("CreateHostRegistration failed: %v", err)
@@ -148,7 +148,7 @@ func TestJoinWithExpiredToken(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a host registration (token will already be expired)
-	req := CreateHostRegistrationRequest{Name: "test-host"}
+	req := CreateBrokerRegistrationRequest{Name: "test-host"}
 	resp, err := svc.CreateHostRegistration(ctx, req, "admin")
 	if err != nil {
 		t.Fatalf("CreateHostRegistration failed: %v", err)
@@ -176,7 +176,7 @@ func TestJoinTokenSingleUse(t *testing.T) {
 	ctx := context.Background()
 
 	// Create and complete a host registration
-	req := CreateHostRegistrationRequest{Name: "test-host"}
+	req := CreateBrokerRegistrationRequest{Name: "test-host"}
 	resp, err := svc.CreateHostRegistration(ctx, req, "admin")
 	if err != nil {
 		t.Fatalf("CreateHostRegistration failed: %v", err)

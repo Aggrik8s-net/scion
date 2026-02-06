@@ -15,7 +15,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/store/sqlite"
 )
 
-func TestAuthenticatedHostClient_CreateAgent(t *testing.T) {
+func TestAuthenticatedBrokerClient_CreateAgent(t *testing.T) {
 	// Create a test store with a broker secret
 	db, err := sqlite.New(":memory:")
 	if err != nil {
@@ -98,7 +98,7 @@ func TestAuthenticatedHostClient_CreateAgent(t *testing.T) {
 	defer server.Close()
 
 	// Create authenticated client
-	client := NewAuthenticatedHostClient(db, true)
+	client := NewAuthenticatedBrokerClient(db, true)
 
 	// Make request
 	req := &RemoteCreateAgentRequest{
@@ -130,7 +130,7 @@ func TestAuthenticatedHostClient_CreateAgent(t *testing.T) {
 	}
 }
 
-func TestAuthenticatedHostClient_StartAgent(t *testing.T) {
+func TestAuthenticatedBrokerClient_StartAgent(t *testing.T) {
 	// Create a test store with a broker secret
 	db, err := sqlite.New(":memory:")
 	if err != nil {
@@ -188,7 +188,7 @@ func TestAuthenticatedHostClient_StartAgent(t *testing.T) {
 	defer server.Close()
 
 	// Create authenticated client
-	client := NewAuthenticatedHostClient(db, false)
+	client := NewAuthenticatedBrokerClient(db, false)
 
 	// Make request
 	err = client.StartAgent(context.Background(), brokerID, server.URL, "my-agent")
@@ -205,7 +205,7 @@ func TestAuthenticatedHostClient_StartAgent(t *testing.T) {
 	}
 }
 
-func TestAuthenticatedHostClient_MissingSecret(t *testing.T) {
+func TestAuthenticatedBrokerClient_MissingSecret(t *testing.T) {
 	// Create a test store without a secret
 	db, err := sqlite.New(":memory:")
 	if err != nil {
@@ -247,7 +247,7 @@ func TestAuthenticatedHostClient_MissingSecret(t *testing.T) {
 	defer server.Close()
 
 	// Create authenticated client with debug mode to see warning
-	client := NewAuthenticatedHostClient(db, true)
+	client := NewAuthenticatedBrokerClient(db, true)
 
 	// Make request - should succeed but without signature
 	req := &RemoteCreateAgentRequest{
@@ -267,7 +267,7 @@ func TestAuthenticatedHostClient_MissingSecret(t *testing.T) {
 	}
 }
 
-func TestAuthenticatedHostClient_ExpiredSecret(t *testing.T) {
+func TestAuthenticatedBrokerClient_ExpiredSecret(t *testing.T) {
 	// Create a test store with an expired secret
 	db, err := sqlite.New(":memory:")
 	if err != nil {
@@ -320,7 +320,7 @@ func TestAuthenticatedHostClient_ExpiredSecret(t *testing.T) {
 	defer server.Close()
 
 	// Create authenticated client
-	client := NewAuthenticatedHostClient(db, true)
+	client := NewAuthenticatedBrokerClient(db, true)
 
 	// Make request - should proceed without signature due to expired secret
 	req := &RemoteCreateAgentRequest{
@@ -340,7 +340,7 @@ func TestAuthenticatedHostClient_ExpiredSecret(t *testing.T) {
 	}
 }
 
-func TestAuthenticatedHostClient_AllOperations(t *testing.T) {
+func TestAuthenticatedBrokerClient_AllOperations(t *testing.T) {
 	// Create a test store with a broker secret
 	db, err := sqlite.New(":memory:")
 	if err != nil {
@@ -402,7 +402,7 @@ func TestAuthenticatedHostClient_AllOperations(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAuthenticatedHostClient(db, false)
+	client := NewAuthenticatedBrokerClient(db, false)
 	ctx := context.Background()
 
 	// Test all operations

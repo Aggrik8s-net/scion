@@ -44,7 +44,7 @@ func NewHTTPRuntimeBrokerClientWithDebug(debug bool) *HTTPRuntimeBrokerClient {
 
 // CreateAgent creates an agent on a remote runtime broker.
 // Note: brokerID is unused in this unauthenticated client but is part of the
-// RuntimeBrokerClient interface for compatibility with AuthenticatedHostClient.
+// RuntimeBrokerClient interface for compatibility with AuthenticatedBrokerClient.
 func (c *HTTPRuntimeBrokerClient) CreateAgent(ctx context.Context, brokerID, hostEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
 	_ = brokerID // Unused in unauthenticated client
 	endpoint := fmt.Sprintf("%s/api/v1/agents", strings.TrimSuffix(hostEndpoint, "/"))

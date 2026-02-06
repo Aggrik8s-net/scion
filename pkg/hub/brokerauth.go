@@ -120,15 +120,15 @@ func NewBrokerAuthService(config BrokerAuthConfig, s store.Store) *BrokerAuthSer
 // Host Registration
 // =============================================================================
 
-// CreateHostRegistrationRequest is the request body for POST /api/v1/brokers.
-type CreateHostRegistrationRequest struct {
+// CreateBrokerRegistrationRequest is the request body for POST /api/v1/brokers.
+type CreateBrokerRegistrationRequest struct {
 	Name         string            `json:"name"`
 	Capabilities []string          `json:"capabilities,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
 }
 
-// CreateHostRegistrationResponse is the response for POST /api/v1/brokers.
-type CreateHostRegistrationResponse struct {
+// CreateBrokerRegistrationResponse is the response for POST /api/v1/brokers.
+type CreateBrokerRegistrationResponse struct {
 	BrokerID string    `json:"brokerId"`
 	JoinToken string    `json:"joinToken"` // scion_join_<base64>
 	ExpiresAt time.Time `json:"expiresAt"`
@@ -155,7 +155,7 @@ const JoinTokenPrefix = "scion_join_"
 
 // CreateHostRegistration creates a new host with a join token.
 // Requires admin authentication.
-func (s *BrokerAuthService) CreateHostRegistration(ctx context.Context, req CreateHostRegistrationRequest, createdBy string) (*CreateHostRegistrationResponse, error) {
+func (s *BrokerAuthService) CreateHostRegistration(ctx context.Context, req CreateBrokerRegistrationRequest, createdBy string) (*CreateBrokerRegistrationResponse, error) {
 	if req.Name == "" {
 		return nil, errors.New("name is required")
 	}
@@ -207,7 +207,7 @@ func (s *BrokerAuthService) CreateHostRegistration(ctx context.Context, req Crea
 		return nil, fmt.Errorf("failed to create join token: %w", err)
 	}
 
-	return &CreateHostRegistrationResponse{
+	return &CreateBrokerRegistrationResponse{
 		BrokerID:    brokerID,
 		JoinToken: joinToken,
 		ExpiresAt: expiresAt,

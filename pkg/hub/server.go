@@ -121,7 +121,7 @@ type AgentDispatcher interface {
 // RuntimeBrokerClient is an interface for communicating with runtime brokers over HTTP.
 // This allows the hub to dispatch operations to remote runtime brokers.
 // All methods take a brokerID parameter which is used for HMAC authentication when
-// the client supports it (AuthenticatedHostClient).
+// the client supports it (AuthenticatedBrokerClient).
 type RuntimeBrokerClient interface {
 	// CreateAgent creates an agent on a remote runtime broker.
 	// brokerID is used for HMAC authentication lookup.
@@ -281,7 +281,7 @@ func New(cfg ServerConfig, s store.Store) *Server {
 	if cfg.BrokerAuthConfig.Enabled {
 		srv.brokerAuthService = NewBrokerAuthService(cfg.BrokerAuthConfig, s)
 		srv.auditLogger = NewLogAuditLogger("[Hub Audit]", cfg.Debug)
-		srv.metrics = NewHostAuthMetrics()
+		srv.metrics = NewBrokerAuthMetrics()
 		slog.Info("Host HMAC authentication enabled")
 	}
 
@@ -455,12 +455,12 @@ func (s *Server) GetControlChannelManager() *ControlChannelManager {
 // It also supports control channel fallback for NAT traversal.
 func (s *Server) CreateAuthenticatedDispatcher() *HTTPAgentDispatcher {
 	// Create authenticated HTTP client
-	httpClient := NewAuthenticatedHostClient(s.store, s.config.Debug)
+	httpClient := NewAuthenticatedBrokerClient(s.store, s.config.Debug)
 
 	// Wrap with hybrid client that prefers control channel
 	var client RuntimeBrokerClient
 	if s.controlChannel != nil {
-		client = NewHybridHostClient(s.controlChannel, httpClient, s.config.Debug)
+		client = NewHybridBrokerClient(s.controlChannel, httpClient, s.config.Debug)
 	} else {
 		client = httpClient
 	}

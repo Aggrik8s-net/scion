@@ -17,18 +17,18 @@ import (
 	"github.com/ptone/scion-agent/pkg/store"
 )
 
-// AuthenticatedHostClient is an HTTP-based RuntimeBrokerClient that signs
+// AuthenticatedBrokerClient is an HTTP-based RuntimeBrokerClient that signs
 // outgoing requests with HMAC authentication. This allows the Hub to make
 // authenticated requests to Runtime Brokers.
-type AuthenticatedHostClient struct {
+type AuthenticatedBrokerClient struct {
 	httpClient *http.Client
 	store      store.Store
 	debug      bool
 }
 
-// NewAuthenticatedHostClient creates a new authenticated host client.
-func NewAuthenticatedHostClient(s store.Store, debug bool) *AuthenticatedHostClient {
-	return &AuthenticatedHostClient{
+// NewAuthenticatedBrokerClient creates a new authenticated host client.
+func NewAuthenticatedBrokerClient(s store.Store, debug bool) *AuthenticatedBrokerClient {
+	return &AuthenticatedBrokerClient{
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second, // Agent creation can take a while
 		},
@@ -38,7 +38,7 @@ func NewAuthenticatedHostClient(s store.Store, debug bool) *AuthenticatedHostCli
 }
 
 // getBrokerSecret retrieves the secret key for a host from the store.
-func (c *AuthenticatedHostClient) getBrokerSecret(ctx context.Context, brokerID string) ([]byte, error) {
+func (c *AuthenticatedBrokerClient) getBrokerSecret(ctx context.Context, brokerID string) ([]byte, error) {
 	secret, err := c.store.GetBrokerSecret(ctx, brokerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get broker secret: %w", err)
@@ -56,7 +56,7 @@ func (c *AuthenticatedHostClient) getBrokerSecret(ctx context.Context, brokerID 
 }
 
 // signRequest signs an HTTP request with HMAC authentication.
-func (c *AuthenticatedHostClient) signRequest(ctx context.Context, req *http.Request, brokerID string) error {
+func (c *AuthenticatedBrokerClient) signRequest(ctx context.Context, req *http.Request, brokerID string) error {
 	secret, err := c.getBrokerSecret(ctx, brokerID)
 	if err != nil {
 		return err
@@ -72,7 +72,7 @@ func (c *AuthenticatedHostClient) signRequest(ctx context.Context, req *http.Req
 }
 
 // doRequest performs an HTTP request with HMAC signing.
-func (c *AuthenticatedHostClient) doRequest(ctx context.Context, brokerID, method, endpoint string, body []byte) (*http.Response, error) {
+func (c *AuthenticatedBrokerClient) doRequest(ctx context.Context, brokerID, method, endpoint string, body []byte) (*http.Response, error) {
 	var bodyReader io.Reader
 	if body != nil {
 		bodyReader = bytes.NewReader(body)
@@ -105,7 +105,7 @@ func (c *AuthenticatedHostClient) doRequest(ctx context.Context, brokerID, metho
 }
 
 // CreateAgent creates an agent on a remote runtime broker with HMAC authentication.
-func (c *AuthenticatedHostClient) CreateAgent(ctx context.Context, brokerID, hostEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
+func (c *AuthenticatedBrokerClient) CreateAgent(ctx context.Context, brokerID, hostEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
 	endpoint := fmt.Sprintf("%s/api/v1/agents", strings.TrimSuffix(hostEndpoint, "/"))
 
 	body, err := json.Marshal(req)
@@ -133,7 +133,7 @@ func (c *AuthenticatedHostClient) CreateAgent(ctx context.Context, brokerID, hos
 }
 
 // StartAgent starts an agent on a remote runtime broker with HMAC authentication.
-func (c *AuthenticatedHostClient) StartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
+func (c *AuthenticatedBrokerClient) StartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/start", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
 
 	resp, err := c.doRequest(ctx, brokerID, http.MethodPost, endpoint, nil)
@@ -151,7 +151,7 @@ func (c *AuthenticatedHostClient) StartAgent(ctx context.Context, brokerID, host
 }
 
 // StopAgent stops an agent on a remote runtime broker with HMAC authentication.
-func (c *AuthenticatedHostClient) StopAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
+func (c *AuthenticatedBrokerClient) StopAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/stop", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
 
 	resp, err := c.doRequest(ctx, brokerID, http.MethodPost, endpoint, nil)
@@ -169,7 +169,7 @@ func (c *AuthenticatedHostClient) StopAgent(ctx context.Context, brokerID, hostE
 }
 
 // RestartAgent restarts an agent on a remote runtime broker with HMAC authentication.
-func (c *AuthenticatedHostClient) RestartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
+func (c *AuthenticatedBrokerClient) RestartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/restart", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
 
 	resp, err := c.doRequest(ctx, brokerID, http.MethodPost, endpoint, nil)
@@ -187,7 +187,7 @@ func (c *AuthenticatedHostClient) RestartAgent(ctx context.Context, brokerID, ho
 }
 
 // DeleteAgent deletes an agent from a remote runtime broker with HMAC authentication.
-func (c *AuthenticatedHostClient) DeleteAgent(ctx context.Context, brokerID, hostEndpoint, agentID string, deleteFiles, removeBranch bool) error {
+func (c *AuthenticatedBrokerClient) DeleteAgent(ctx context.Context, brokerID, hostEndpoint, agentID string, deleteFiles, removeBranch bool) error {
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s?deleteFiles=%t&removeBranch=%t",
 		strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID), deleteFiles, removeBranch)
 
@@ -206,7 +206,7 @@ func (c *AuthenticatedHostClient) DeleteAgent(ctx context.Context, brokerID, hos
 }
 
 // MessageAgent sends a message to an agent on a remote runtime broker with HMAC authentication.
-func (c *AuthenticatedHostClient) MessageAgent(ctx context.Context, brokerID, hostEndpoint, agentID, message string, interrupt bool) error {
+func (c *AuthenticatedBrokerClient) MessageAgent(ctx context.Context, brokerID, hostEndpoint, agentID, message string, interrupt bool) error {
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/message", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
 
 	body, err := json.Marshal(map[string]interface{}{

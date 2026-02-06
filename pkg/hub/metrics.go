@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-// HostAuthMetrics tracks metrics for host authentication.
+// BrokerAuthMetrics tracks metrics for host authentication.
 // This provides a simple, dependency-free metrics implementation.
 // For production use with Prometheus, implement MetricsRecorder interface.
-type HostAuthMetrics struct {
+type BrokerAuthMetrics struct {
 	// Authentication counters
 	authAttempts  atomic.Int64
 	authSuccesses atomic.Int64
@@ -92,16 +92,16 @@ type MetricsSnapshot struct {
 	AuthLatencyP99 float64 `json:"authLatencyP99Ms,omitempty"`
 }
 
-// NewHostAuthMetrics creates a new metrics tracker.
-func NewHostAuthMetrics() *HostAuthMetrics {
-	return &HostAuthMetrics{
+// NewBrokerAuthMetrics creates a new metrics tracker.
+func NewBrokerAuthMetrics() *BrokerAuthMetrics {
+	return &BrokerAuthMetrics{
 		authLatencies:    make([]time.Duration, 0, 1000),
 		maxLatencySample: 1000,
 	}
 }
 
 // RecordAuthAttempt records an authentication attempt.
-func (m *HostAuthMetrics) RecordAuthAttempt(brokerID string, success bool, latency time.Duration) {
+func (m *BrokerAuthMetrics) RecordAuthAttempt(brokerID string, success bool, latency time.Duration) {
 	m.authAttempts.Add(1)
 	if success {
 		m.authSuccesses.Add(1)
@@ -122,12 +122,12 @@ func (m *HostAuthMetrics) RecordAuthAttempt(brokerID string, success bool, laten
 }
 
 // RecordRegistration records a host registration.
-func (m *HostAuthMetrics) RecordRegistration(brokerID string) {
+func (m *BrokerAuthMetrics) RecordRegistration(brokerID string) {
 	m.registrations.Add(1)
 }
 
 // RecordJoin records a host join attempt.
-func (m *HostAuthMetrics) RecordJoin(brokerID string, success bool) {
+func (m *BrokerAuthMetrics) RecordJoin(brokerID string, success bool) {
 	m.joins.Add(1)
 	if !success {
 		m.joinFailures.Add(1)
@@ -135,12 +135,12 @@ func (m *HostAuthMetrics) RecordJoin(brokerID string, success bool) {
 }
 
 // RecordRotation records a secret rotation.
-func (m *HostAuthMetrics) RecordRotation(brokerID string) {
+func (m *BrokerAuthMetrics) RecordRotation(brokerID string) {
 	m.rotations.Add(1)
 }
 
 // RecordDispatch records a dispatch attempt to a runtime broker.
-func (m *HostAuthMetrics) RecordDispatch(brokerID string, operation string, success bool, latency time.Duration) {
+func (m *BrokerAuthMetrics) RecordDispatch(brokerID string, operation string, success bool, latency time.Duration) {
 	m.dispatchAttempts.Add(1)
 	if !success {
 		m.dispatchFailures.Add(1)
@@ -148,12 +148,12 @@ func (m *HostAuthMetrics) RecordDispatch(brokerID string, operation string, succ
 }
 
 // SetConnectedHosts sets the current number of connected hosts.
-func (m *HostAuthMetrics) SetConnectedHosts(count int64) {
+func (m *BrokerAuthMetrics) SetConnectedHosts(count int64) {
 	m.connectedHosts.Store(count)
 }
 
 // GetSnapshot returns a snapshot of current metrics.
-func (m *HostAuthMetrics) GetSnapshot() *MetricsSnapshot {
+func (m *BrokerAuthMetrics) GetSnapshot() *MetricsSnapshot {
 	snapshot := &MetricsSnapshot{
 		Timestamp:        time.Now(),
 		AuthAttempts:     m.authAttempts.Load(),

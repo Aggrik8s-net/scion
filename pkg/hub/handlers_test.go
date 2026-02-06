@@ -1212,7 +1212,7 @@ func TestHostRegistrationTwoPhaseFlow(t *testing.T) {
 		t.Errorf("Phase 1: expected status 201, got %d: %s", rec1.Code, rec1.Body.String())
 	}
 
-	var createResp CreateHostRegistrationResponse
+	var createResp CreateBrokerRegistrationResponse
 	if err := json.NewDecoder(rec1.Body).Decode(&createResp); err != nil {
 		t.Fatalf("failed to decode create response: %v", err)
 	}
@@ -1298,7 +1298,7 @@ func TestHostJoinWithInvalidToken(t *testing.T) {
 		t.Fatalf("failed to create host: %s", rec1.Body.String())
 	}
 
-	var createResp CreateHostRegistrationResponse
+	var createResp CreateBrokerRegistrationResponse
 	if err := json.NewDecoder(rec1.Body).Decode(&createResp); err != nil {
 		t.Fatalf("failed to decode create response: %v", err)
 	}

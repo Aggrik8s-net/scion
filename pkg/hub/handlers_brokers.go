@@ -39,7 +39,7 @@ func (s *Server) createBrokerRegistration(w http.ResponseWriter, r *http.Request
 	}
 
 	// Parse request
-	var req CreateHostRegistrationRequest
+	var req CreateBrokerRegistrationRequest
 	if err := readJSON(r, &req); err != nil {
 		BadRequest(w, "invalid request body: "+err.Error())
 		return
