@@ -11,7 +11,7 @@ import (
 
 // AgentService handles agent operations on a runtime broker.
 type AgentService interface {
-	// List returns agents on this host.
+	// List returns agents on this broker.
 	List(ctx context.Context, opts *ListAgentsOptions) (*runtimebroker.ListAgentsResponse, error)
 
 	// Get returns a single agent by ID.
@@ -71,7 +71,7 @@ type GetLogsOptions struct {
 	Timestamps bool   // Include timestamps
 }
 
-// List returns agents on this host.
+// List returns agents on this broker.
 func (s *agentService) List(ctx context.Context, opts *ListAgentsOptions) (*runtimebroker.ListAgentsResponse, error) {
 	query := url.Values{}
 	if opts != nil {

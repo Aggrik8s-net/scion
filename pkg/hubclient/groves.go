@@ -19,7 +19,7 @@ type GroveService interface {
 	// Register registers a grove (upsert based on git remote).
 	Register(ctx context.Context, req *RegisterGroveRequest) (*RegisterGroveResponse, error)
 
-	// Create creates a grove without a contributing host.
+	// Create creates a grove without a contributing broker.
 	Create(ctx context.Context, req *CreateGroveRequest) (*Grove, error)
 
 	// Update updates grove metadata.
@@ -34,10 +34,10 @@ type GroveService interface {
 	// ListContributors returns runtime brokers contributing to a grove.
 	ListContributors(ctx context.Context, groveID string) (*ListContributorsResponse, error)
 
-	// AddContributor adds a host as a contributor to a grove.
+	// AddContributor adds a broker as a contributor to a grove.
 	AddContributor(ctx context.Context, groveID string, req *AddContributorRequest) (*AddContributorResponse, error)
 
-	// RemoveContributor removes a host from a grove.
+	// RemoveContributor removes a broker from a grove.
 	RemoveContributor(ctx context.Context, groveID, brokerID string) error
 
 	// GetAgent returns an agent by ID or slug within a grove.
@@ -87,7 +87,7 @@ type RegisterGroveRequest struct {
 	Labels    map[string]string `json:"labels,omitempty"`
 }
 
-// BrokerInfo describes the registering host.
+// BrokerInfo describes the registering broker.
 type BrokerInfo struct {
 	ID           string            `json:"id,omitempty"`
 	Name         string            `json:"name"`
@@ -105,7 +105,7 @@ type RegisterGroveResponse struct {
 	SecretKey string       `json:"secretKey,omitempty"` // DEPRECATED: secrets only from /brokers/join
 }
 
-// CreateGroveRequest is the request for creating a grove without a host.
+// CreateGroveRequest is the request for creating a grove without a broker.
 type CreateGroveRequest struct {
 	Name       string            `json:"name"`
 	GitRemote  string            `json:"gitRemote,omitempty"`
@@ -126,7 +126,7 @@ type ListContributorsResponse struct {
 	Contributors []GroveContributor `json:"contributors"`
 }
 
-// AddContributorRequest is the request for adding a host as a grove contributor.
+// AddContributorRequest is the request for adding a broker as a grove contributor.
 type AddContributorRequest struct {
 	BrokerID string `json:"brokerId"`
 	LocalPath string `json:"localPath,omitempty"`
@@ -203,7 +203,7 @@ func (s *groveService) Register(ctx context.Context, req *RegisterGroveRequest) 
 	return apiclient.DecodeResponse[RegisterGroveResponse](resp)
 }
 
-// Create creates a grove without a contributing host.
+// Create creates a grove without a contributing broker.
 func (s *groveService) Create(ctx context.Context, req *CreateGroveRequest) (*Grove, error) {
 	resp, err := s.c.transport.Post(ctx, "/api/v1/groves", req, nil)
 	if err != nil {
@@ -284,7 +284,7 @@ func (s *groveService) ListContributors(ctx context.Context, groveID string) (*L
 	return apiclient.DecodeResponse[ListContributorsResponse](resp)
 }
 
-// AddContributor adds a host as a contributor to a grove.
+// AddContributor adds a broker as a contributor to a grove.
 func (s *groveService) AddContributor(ctx context.Context, groveID string, req *AddContributorRequest) (*AddContributorResponse, error) {
 	resp, err := s.c.transport.Post(ctx, "/api/v1/groves/"+groveID+"/contributors", req, nil)
 	if err != nil {
@@ -293,7 +293,7 @@ func (s *groveService) AddContributor(ctx context.Context, groveID string, req *
 	return apiclient.DecodeResponse[AddContributorResponse](resp)
 }
 
-// RemoveContributor removes a host from a grove.
+// RemoveContributor removes a broker from a grove.
 func (s *groveService) RemoveContributor(ctx context.Context, groveID, brokerID string) error {
 	resp, err := s.c.transport.Delete(ctx, "/api/v1/groves/"+groveID+"/contributors/"+brokerID, nil)
 	if err != nil {

@@ -232,7 +232,7 @@ func WithAutoDevAuth() Option {
 	}
 }
 
-// WithHMACAuth sets HMAC-based host authentication.
+// WithHMACAuth sets HMAC-based broker authentication.
 // This is used by Runtime Brokers to authenticate with the Hub using
 // the shared secret established during the join process.
 func WithHMACAuth(brokerID string, secretKey []byte) Option {

@@ -48,7 +48,7 @@ type BrokerCapabilities struct {
 	Exec   bool `json:"exec"`
 }
 
-// GroveInfo is a summary of a grove registered on this host.
+// GroveInfo is a summary of a grove registered on this broker.
 type GroveInfo struct {
 	GroveID    string `json:"groveId"`
 	GroveName  string `json:"groveName"`

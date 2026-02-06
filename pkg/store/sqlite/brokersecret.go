@@ -12,7 +12,7 @@ import (
 )
 
 // ============================================================================
-// Host Secret Operations
+// Broker Secret Operations
 // ============================================================================
 
 // CreateBrokerSecret creates a new broker secret record.
@@ -51,7 +51,7 @@ func (s *SQLiteStore) CreateBrokerSecret(ctx context.Context, secret *store.Brok
 	return nil
 }
 
-// GetBrokerSecret retrieves a broker secret by host ID.
+// GetBrokerSecret retrieves a broker secret by broker ID.
 func (s *SQLiteStore) GetBrokerSecret(ctx context.Context, brokerID string) (*store.BrokerSecret, error) {
 	secret := &store.BrokerSecret{}
 	var rotatedAt, expiresAt sql.NullTime
@@ -81,7 +81,7 @@ func (s *SQLiteStore) GetBrokerSecret(ctx context.Context, brokerID string) (*st
 	return secret, nil
 }
 
-// GetActiveSecrets retrieves all active and deprecated secrets for a host.
+// GetActiveSecrets retrieves all active and deprecated secrets for a broker.
 // This supports dual-secret validation during rotation grace periods.
 func (s *SQLiteStore) GetActiveSecrets(ctx context.Context, brokerID string) ([]*store.BrokerSecret, error) {
 	rows, err := s.db.QueryContext(ctx, `
@@ -174,10 +174,10 @@ func (s *SQLiteStore) DeleteBrokerSecret(ctx context.Context, brokerID string) e
 }
 
 // ============================================================================
-// Host Join Token Operations
+// Broker Join Token Operations
 // ============================================================================
 
-// CreateJoinToken creates a new join token for host registration.
+// CreateJoinToken creates a new join token for broker registration.
 func (s *SQLiteStore) CreateJoinToken(ctx context.Context, token *store.BrokerJoinToken) error {
 	if token.BrokerID == "" || token.TokenHash == "" {
 		return store.ErrInvalidInput
@@ -226,7 +226,7 @@ func (s *SQLiteStore) GetJoinToken(ctx context.Context, tokenHash string) (*stor
 	return token, nil
 }
 
-// GetJoinTokenByBrokerID retrieves a join token by host ID.
+// GetJoinTokenByBrokerID retrieves a join token by broker ID.
 func (s *SQLiteStore) GetJoinTokenByBrokerID(ctx context.Context, brokerID string) (*store.BrokerJoinToken, error) {
 	token := &store.BrokerJoinToken{}
 
@@ -245,7 +245,7 @@ func (s *SQLiteStore) GetJoinTokenByBrokerID(ctx context.Context, brokerID strin
 	return token, nil
 }
 
-// DeleteJoinToken removes a join token by host ID.
+// DeleteJoinToken removes a join token by broker ID.
 func (s *SQLiteStore) DeleteJoinToken(ctx context.Context, brokerID string) error {
 	result, err := s.db.ExecContext(ctx, `
 		DELETE FROM broker_join_tokens WHERE broker_id = ?

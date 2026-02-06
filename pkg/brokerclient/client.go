@@ -15,10 +15,10 @@ type Client interface {
 	// Agents returns the agent operations interface.
 	Agents() AgentService
 
-	// Info returns host information.
+	// Info returns broker information.
 	Info(ctx context.Context) (*runtimebroker.BrokerInfoResponse, error)
 
-	// Health checks host availability.
+	// Health checks broker availability.
 	Health(ctx context.Context) (*runtimebroker.HealthResponse, error)
 }
 
@@ -48,7 +48,7 @@ func (c *client) Agents() AgentService {
 	return c.agents
 }
 
-// Info returns host information.
+// Info returns broker information.
 func (c *client) Info(ctx context.Context) (*runtimebroker.BrokerInfoResponse, error) {
 	resp, err := c.transport.Get(ctx, "/api/v1/info", nil)
 	if err != nil {
@@ -57,7 +57,7 @@ func (c *client) Info(ctx context.Context) (*runtimebroker.BrokerInfoResponse, e
 	return apiclient.DecodeResponse[runtimebroker.BrokerInfoResponse](resp)
 }
 
-// Health checks host availability.
+// Health checks broker availability.
 func (c *client) Health(ctx context.Context) (*runtimebroker.HealthResponse, error) {
 	resp, err := c.transport.Get(ctx, "/healthz", nil)
 	if err != nil {

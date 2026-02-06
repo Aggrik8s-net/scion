@@ -49,7 +49,7 @@ type BrokerTokenAuth struct {
 	Token string
 }
 
-// ApplyAuth adds the host token to the X-Scion-Broker-Token header.
+// ApplyAuth adds the broker token to the X-Scion-Broker-Token header.
 func (a *BrokerTokenAuth) ApplyAuth(req *http.Request) error {
 	if a.Token != "" {
 		req.Header.Set("X-Scion-Broker-Token", a.Token)
@@ -57,7 +57,7 @@ func (a *BrokerTokenAuth) ApplyAuth(req *http.Request) error {
 	return nil
 }
 
-// Refresh indicates that refresh is not supported for host tokens.
+// Refresh indicates that refresh is not supported for broker tokens.
 func (a *BrokerTokenAuth) Refresh() (bool, error) { return false, nil }
 
 // AgentTokenAuth implements Agent token authentication.

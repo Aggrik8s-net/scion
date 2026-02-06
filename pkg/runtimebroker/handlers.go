@@ -195,7 +195,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build merged environment:
-	// 1. Start with resolvedEnv (from Hub, contains user/grove/host vars and secrets)
+	// 1. Start with resolvedEnv (from Hub, contains user/grove/broker vars and secrets)
 	// 2. Override with config.Env (explicitly set in request)
 	// 3. Add Hub authentication credentials if provided
 	env := make(map[string]string)

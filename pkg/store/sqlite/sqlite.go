@@ -247,7 +247,7 @@ CREATE INDEX IF NOT EXISTS idx_groves_default_runtime_broker ON groves(default_r
 
 // Migration V3: Add local_path to grove_contributors
 const migrationV3 = `
--- Add local_path column to grove_contributors for tracking filesystem paths per host
+-- Add local_path column to grove_contributors for tracking filesystem paths per broker
 ALTER TABLE grove_contributors ADD COLUMN local_path TEXT;
 `
 
@@ -403,9 +403,9 @@ const migrationV8 = `
 ALTER TABLE agents ADD COLUMN message TEXT;
 `
 
-// Migration V9: Host secrets and join tokens for Runtime Broker authentication
+// Migration V9: Broker secrets and join tokens for Runtime Broker authentication
 const migrationV9 = `
--- Host secrets table for HMAC-based authentication
+-- Broker secrets table for HMAC-based authentication
 CREATE TABLE IF NOT EXISTS broker_secrets (
     broker_id TEXT PRIMARY KEY,
     secret_key BLOB NOT NULL,
@@ -417,7 +417,7 @@ CREATE TABLE IF NOT EXISTS broker_secrets (
     FOREIGN KEY (broker_id) REFERENCES runtime_brokers(id) ON DELETE CASCADE
 );
 
--- Host join tokens table for registration bootstrap
+-- Broker join tokens table for registration bootstrap
 CREATE TABLE IF NOT EXISTS broker_join_tokens (
     broker_id TEXT PRIMARY KEY,
     token_hash TEXT NOT NULL UNIQUE,

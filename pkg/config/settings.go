@@ -82,13 +82,13 @@ type HubClientConfig struct {
 	APIKey string `json:"apiKey,omitempty" yaml:"apiKey,omitempty" koanf:"apiKey"`
 	// GroveID is the unique identifier for the grove when registered with the Hub
 	GroveID string `json:"groveId,omitempty" yaml:"groveId,omitempty" koanf:"groveId"`
-	// HostID is the unique identifier for this host when registered with the Hub.
+	// BrokerID is the unique identifier for this broker when registered with the Hub.
 	// This is a durable UUID that persists across server restarts.
 	BrokerID string `json:"brokerId,omitempty" yaml:"brokerId,omitempty" koanf:"brokerId"`
-	// HostNickname is a human-readable name for this host.
+	// BrokerNickname is a human-readable name for this broker.
 	// If not set, defaults to the system hostname.
 	BrokerNickname string `json:"brokerNickname,omitempty" yaml:"brokerNickname,omitempty" koanf:"brokerNickname"`
-	// HostToken is the token received when registering this host with the Hub
+	// BrokerToken is the token received when registering this broker with the Hub
 	BrokerToken string `json:"brokerToken,omitempty" yaml:"brokerToken,omitempty" koanf:"brokerToken"`
 }
 
@@ -712,7 +712,7 @@ func GetSettingsMap(s *Settings) map[string]string {
 		m["hub.brokerId"] = s.Hub.BrokerID
 		m["hub.brokerNickname"] = s.Hub.BrokerNickname
 		if s.Hub.BrokerToken != "" {
-			m["hub.brokerToken"] = "********" // Mask host token
+			m["hub.brokerToken"] = "********" // Mask broker token
 		}
 	}
 	if s.CLI != nil {

@@ -24,7 +24,7 @@ type BrokerAuthConfig struct {
 	AllowUnauthenticated bool
 }
 
-// DefaultBrokerAuthConfig returns the default host authentication configuration.
+// DefaultBrokerAuthConfig returns the default broker authentication configuration.
 func DefaultBrokerAuthConfig() BrokerAuthConfig {
 	return BrokerAuthConfig{
 		Enabled:              false,
@@ -39,7 +39,7 @@ type BrokerAuthMiddleware struct {
 	config BrokerAuthConfig
 }
 
-// NewBrokerAuthMiddleware creates a new host authentication middleware.
+// NewBrokerAuthMiddleware creates a new broker authentication middleware.
 func NewBrokerAuthMiddleware(cfg BrokerAuthConfig) *BrokerAuthMiddleware {
 	return &BrokerAuthMiddleware{config: cfg}
 }

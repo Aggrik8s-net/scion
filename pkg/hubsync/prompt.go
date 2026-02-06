@@ -59,7 +59,7 @@ func ShowSyncPlan(result *SyncResult, autoConfirm bool) bool {
 	}
 
 	if len(result.ToRemove) > 0 {
-		fmt.Println("Agents to remove from Hub (not on this host):")
+		fmt.Println("Agents to remove from Hub (not on this broker):")
 		for _, ref := range result.ToRemove {
 			fmt.Printf("  - %s\n", ref.Name)
 		}

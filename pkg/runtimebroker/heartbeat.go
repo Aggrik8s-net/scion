@@ -63,7 +63,7 @@ func NewHeartbeatService(client hubclient.RuntimeBrokerService, brokerID string,
 	}
 }
 
-// SetVersion sets the host version reported in heartbeats.
+// SetVersion sets the broker version reported in heartbeats.
 func (s *HeartbeatService) SetVersion(version string) {
 	s.version = version
 }
@@ -172,7 +172,7 @@ func (s *HeartbeatService) gatherGroveAgents() []hubclient.GroveHeartbeat {
 		return nil
 	}
 
-	// List all agents managed by this host
+	// List all agents managed by this broker
 	agents, err := s.manager.List(context.Background(), nil)
 	if err != nil {
 		slog.Error("Failed to list agents for heartbeat", "error", err)

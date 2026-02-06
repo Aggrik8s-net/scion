@@ -34,7 +34,7 @@ type AgentRef struct {
 // SyncResult represents the result of comparing local and Hub agents.
 type SyncResult struct {
 	ToRegister []string   // Local agents to register on Hub
-	ToRemove   []AgentRef // Hub agents (for this host) to remove (with IDs for API)
+	ToRemove   []AgentRef // Hub agents (for this broker) to remove (with IDs for API)
 	InSync     []string   // Agents already in sync
 	Pending    []AgentRef // Hub agents in pending status (not yet started, no local artifacts expected)
 }
@@ -198,7 +198,7 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 		return nil, wrapHubError(fmt.Errorf("Hub at %s is not responding: %w", endpoint, err))
 	}
 
-	// Get host ID
+	// Get broker ID
 	brokerID := ""
 	if settings.Hub != nil {
 		brokerID = settings.Hub.BrokerID
@@ -269,7 +269,7 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 		if err := registerGrove(context.Background(), hubCtx, groveName, isGlobal); err != nil {
 			return nil, wrapHubError(fmt.Errorf("failed to register grove: %w", err))
 		}
-		// Reload settings to get updated host ID and grove_id
+		// Reload settings to get updated broker ID and grove_id
 		settings, err = config.LoadSettings(resolvedPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to reload settings: %w", err)
@@ -315,7 +315,7 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 	return hubCtx, nil
 }
 
-// CompareAgents compares local agents with Hub agents for the current host.
+// CompareAgents compares local agents with Hub agents for the current broker.
 func CompareAgents(ctx context.Context, hubCtx *HubContext) (*SyncResult, error) {
 	result := &SyncResult{}
 
@@ -329,7 +329,7 @@ func CompareAgents(ctx context.Context, hubCtx *HubContext) (*SyncResult, error)
 	}
 	debugf("Local agents found: %v", localAgents)
 
-	// Get Hub agents for this grove and host
+	// Get Hub agents for this grove and broker
 	ctxTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -370,7 +370,7 @@ func CompareAgents(ctx context.Context, hubCtx *HubContext) (*SyncResult, error)
 		}
 	}
 
-	// Find agents to remove (on Hub for this host but not local)
+	// Find agents to remove (on Hub for this broker but not local)
 	// Skip agents in "pending" status - these are created on Hub but not yet started,
 	// so they're expected to not have local representation until the container is started.
 	for _, a := range resp.Agents {
@@ -467,7 +467,7 @@ func ExecuteSync(ctx context.Context, hubCtx *HubContext, result *SyncResult, au
 		}
 	}
 
-	// Remove Hub agents that are not on this host
+	// Remove Hub agents that are not on this broker
 	for _, ref := range result.ToRemove {
 		fmt.Printf("Removing agent '%s' from Hub...\n", ref.Name)
 		debugf("Deleting agent via grove-scoped endpoint: name=%s, id=%s, groveID=%s",
@@ -574,7 +574,7 @@ func registerGrove(ctx context.Context, hubCtx *HubContext, groveName string, is
 	// Get hostname
 	brokerName, err := os.Hostname()
 	if err != nil {
-		brokerName = "local-host"
+		brokerName = "local-broker"
 	}
 
 	req := &hubclient.RegisterGroveRequest{
@@ -594,7 +594,7 @@ func registerGrove(ctx context.Context, hubCtx *HubContext, groveName string, is
 		return err
 	}
 
-	// Save the host token and ID to GLOBAL settings only.
+	// Save the broker token and ID to GLOBAL settings only.
 	// These are broker-level credentials, not grove-specific.
 	globalDir, globalErr := config.GetGlobalDir()
 	if globalErr != nil {
@@ -602,7 +602,7 @@ func registerGrove(ctx context.Context, hubCtx *HubContext, groveName string, is
 	} else {
 		if resp.BrokerToken != "" {
 			if err := config.UpdateSetting(globalDir, "hub.brokerToken", resp.BrokerToken, true); err != nil {
-				fmt.Printf("Warning: failed to save host token: %v\n", err)
+				fmt.Printf("Warning: failed to save broker token: %v\n", err)
 			}
 		}
 		if resp.Broker != nil && resp.Broker.ID != "" {
