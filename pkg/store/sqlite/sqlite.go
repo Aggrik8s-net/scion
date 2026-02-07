@@ -61,6 +61,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		migrationV8,
 		migrationV9,
 		migrationV10,
+		migrationV11,
 	}
 
 	// Create migrations table if not exists
@@ -439,6 +440,12 @@ ALTER TABLE grove_contributors ADD COLUMN linked_at TIMESTAMP;
 
 -- Add created_by column to runtime_brokers for tracking who registered the broker
 ALTER TABLE runtime_brokers ADD COLUMN created_by TEXT;
+`
+
+// Migration V11: Add auto_provide column to runtime_brokers
+const migrationV11 = `
+-- Add auto_provide column to runtime_brokers for automatic grove provider registration
+ALTER TABLE runtime_brokers ADD COLUMN auto_provide INTEGER NOT NULL DEFAULT 0;
 `
 
 // Helper functions for JSON marshaling/unmarshaling
@@ -1060,15 +1067,15 @@ func (s *SQLiteStore) CreateRuntimeBroker(ctx context.Context, broker *store.Run
 			status, connection_state, last_heartbeat,
 			capabilities, supported_harnesses, resources, runtimes,
 			labels, annotations, endpoint,
-			created_at, updated_at, created_by
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			created_at, updated_at, created_by, auto_provide
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		broker.ID, broker.Name, broker.Slug, "", "", broker.Version,
 		broker.Status, broker.ConnectionState, broker.LastHeartbeat,
 		marshalJSON(broker.Capabilities), "[]",
 		"{}", marshalJSON(broker.Profiles),
 		marshalJSON(broker.Labels), marshalJSON(broker.Annotations), broker.Endpoint,
-		broker.Created, broker.Updated, nullableString(broker.CreatedBy),
+		broker.Created, broker.Updated, nullableString(broker.CreatedBy), broker.AutoProvide,
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
@@ -1091,14 +1098,14 @@ func (s *SQLiteStore) GetRuntimeBroker(ctx context.Context, id string) (*store.R
 			status, connection_state, last_heartbeat,
 			capabilities, supported_harnesses, resources, runtimes,
 			labels, annotations, endpoint,
-			created_at, updated_at, created_by
+			created_at, updated_at, created_by, auto_provide
 		FROM runtime_brokers WHERE id = ?
 	`, id).Scan(
 		&broker.ID, &broker.Name, &broker.Slug, &brokerType, &brokerMode, &broker.Version,
 		&broker.Status, &broker.ConnectionState, &lastHeartbeat,
 		&capabilities, &harnesses, &resources, &profiles,
 		&labels, &annotations, &broker.Endpoint,
-		&broker.Created, &broker.Updated, &createdBy,
+		&broker.Created, &broker.Updated, &createdBy, &broker.AutoProvide,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1142,7 +1149,7 @@ func (s *SQLiteStore) UpdateRuntimeBroker(ctx context.Context, broker *store.Run
 			status = ?, connection_state = ?, last_heartbeat = ?,
 			capabilities = ?, supported_harnesses = ?, resources = ?, runtimes = ?,
 			labels = ?, annotations = ?, endpoint = ?,
-			updated_at = ?
+			updated_at = ?, auto_provide = ?
 		WHERE id = ?
 	`,
 		broker.Name, broker.Slug, "", broker.Version,
@@ -1150,7 +1157,7 @@ func (s *SQLiteStore) UpdateRuntimeBroker(ctx context.Context, broker *store.Run
 		marshalJSON(broker.Capabilities), "[]",
 		"{}", marshalJSON(broker.Profiles),
 		marshalJSON(broker.Labels), marshalJSON(broker.Annotations), broker.Endpoint,
-		broker.Updated,
+		broker.Updated, broker.AutoProvide,
 		broker.ID,
 	)
 	if err != nil {
@@ -1220,7 +1227,7 @@ func (s *SQLiteStore) ListRuntimeBrokers(ctx context.Context, filter store.Runti
 			status, connection_state, last_heartbeat,
 			capabilities, supported_harnesses, resources, runtimes,
 			labels, annotations, endpoint,
-			created_at, updated_at, created_by
+			created_at, updated_at, created_by, auto_provide
 		FROM runtime_brokers %s ORDER BY created_at DESC LIMIT ?
 	`, whereClause)
 	args = append(args, limit)
@@ -1244,7 +1251,7 @@ func (s *SQLiteStore) ListRuntimeBrokers(ctx context.Context, filter store.Runti
 			&broker.Status, &broker.ConnectionState, &lastHeartbeat,
 			&capabilities, &harnesses, &resources, &profiles,
 			&labels, &annotations, &broker.Endpoint,
-			&broker.Created, &broker.Updated, &createdBy,
+			&broker.Created, &broker.Updated, &createdBy, &broker.AutoProvide,
 		); err != nil {
 			return nil, err
 		}
