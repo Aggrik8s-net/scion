@@ -625,10 +625,11 @@ func runBrokerStart(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Log file: %s\n", daemon.GetLogPath(globalDir))
 	fmt.Printf("PID file: %s\n", daemon.GetPIDPath(globalDir))
 	fmt.Println()
-	fmt.Println("Use 'scion broker register' to register with the Hub.")
 	fmt.Println("Use 'scion broker stop' to stop the daemon.")
+	fmt.Println()
 
-	return nil
+	// Show broker status
+	return runBrokerStatus(cmd, args)
 }
 
 func runBrokerStop(cmd *cobra.Command, args []string) error {
