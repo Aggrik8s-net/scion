@@ -868,6 +868,28 @@ func (s *Server) handleGroveRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		created = true
+
+		// Auto-link brokers that have auto_provide enabled
+		autoProvideTrue := true
+		autoProviders, err := s.store.ListRuntimeBrokers(ctx, store.RuntimeBrokerFilter{
+			AutoProvide: &autoProvideTrue,
+		}, store.ListOptions{})
+		if err == nil {
+			for _, autoBroker := range autoProviders.Items {
+				provider := &store.GroveProvider{
+					GroveID:    grove.ID,
+					BrokerID:   autoBroker.ID,
+					BrokerName: autoBroker.Name,
+					Status:     autoBroker.Status,
+					LinkedBy:   "auto-provide",
+				}
+				if addErr := s.store.AddGroveProvider(ctx, provider); addErr != nil {
+					util.Debugf("Warning: failed to auto-link broker %s to grove %s: %v", autoBroker.Name, grove.ID, addErr)
+				}
+			}
+		} else {
+			util.Debugf("Warning: failed to query auto-provide brokers: %v", err)
+		}
 	}
 
 	// Handle broker linking - two paths:

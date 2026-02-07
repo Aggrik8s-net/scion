@@ -189,9 +189,10 @@ type RuntimeBrokerStore interface {
 
 // RuntimeBrokerFilter defines criteria for filtering runtime brokers.
 type RuntimeBrokerFilter struct {
-	Status  string
-	GroveID string
-	Name    string // Exact match on broker name (case-insensitive)
+	Status      string
+	GroveID     string
+	Name        string // Exact match on broker name (case-insensitive)
+	AutoProvide *bool  // Filter by auto-provide flag (nil = no filter)
 }
 
 // TemplateStore defines template persistence operations.

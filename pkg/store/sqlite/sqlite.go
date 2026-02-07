@@ -1205,6 +1205,10 @@ func (s *SQLiteStore) ListRuntimeBrokers(ctx context.Context, filter store.Runti
 		conditions = append(conditions, "LOWER(name) = LOWER(?)")
 		args = append(args, filter.Name)
 	}
+	if filter.AutoProvide != nil {
+		conditions = append(conditions, "auto_provide = ?")
+		args = append(args, *filter.AutoProvide)
+	}
 
 	whereClause := ""
 	if len(conditions) > 0 {
