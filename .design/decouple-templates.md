@@ -479,3 +479,260 @@ scion template decouple old-template --name new-template  # Migrate
 4. **Validation depth**: Should `scion template validate` actually spin up a container, or just check file structure?
 
 5. **Hub template versioning**: How do adapter versions relate to base template versions?
+
+---
+
+## Resource Specifications in Templates
+
+Templates should declare compute resource requirements, similar to Kubernetes pod specifications. This enables predictable agent behavior across different runtime environments and workloads.
+
+### Motivation
+
+Different agent roles have different resource needs:
+- A **code reviewer** may need minimal CPU but significant memory for large diffs
+- A **build agent** may need high CPU for compilation tasks
+- A **research agent** running multiple MCP servers may need both
+
+Without explicit resource specs:
+- Agents may be starved or over-provisioned
+- Runtime behavior becomes unpredictable across environments
+- Capacity planning for hosted deployments is guesswork
+
+### Resource Schema
+
+Add a `resources` section to template configuration:
+
+```yaml
+# In scion-template.yaml (decoupled) or scion-agent.yaml (coupled)
+resources:
+  requests:
+    cpu: "500m"        # 0.5 CPU cores (minimum guaranteed)
+    memory: "512Mi"    # 512 MiB (minimum guaranteed)
+  limits:
+    cpu: "2"           # 2 CPU cores (maximum allowed)
+    memory: "4Gi"      # 4 GiB (maximum allowed, OOM-killed if exceeded)
+```
+
+#### Units
+
+Follow Kubernetes conventions for familiarity:
+
+| Resource | Unit Examples | Notes |
+|----------|---------------|-------|
+| CPU | `"100m"`, `"0.5"`, `"2"` | Millicores or decimal cores |
+| Memory | `"256Mi"`, `"1Gi"`, `"2G"` | Binary (Mi/Gi) or decimal (M/G) |
+
+#### Defaults
+
+Templates without explicit resources inherit runtime defaults:
+
+```yaml
+# Runtime-provided defaults (configurable per broker)
+resources:
+  requests:
+    cpu: "250m"
+    memory: "256Mi"
+  limits:
+    cpu: "1"
+    memory: "2Gi"
+```
+
+### Runtime Mapping
+
+Each runtime translates resource specs to its native mechanism:
+
+#### Kubernetes Runtime
+
+Direct mapping to pod spec:
+
+```go
+func (k *K8sRuntime) applyResources(pod *corev1.Pod, res *api.ResourceSpec) {
+    pod.Spec.Containers[0].Resources = corev1.ResourceRequirements{
+        Requests: corev1.ResourceList{
+            corev1.ResourceCPU:    resource.MustParse(res.Requests.CPU),
+            corev1.ResourceMemory: resource.MustParse(res.Requests.Memory),
+        },
+        Limits: corev1.ResourceList{
+            corev1.ResourceCPU:    resource.MustParse(res.Limits.CPU),
+            corev1.ResourceMemory: resource.MustParse(res.Limits.Memory),
+        },
+    }
+}
+```
+
+#### Docker Runtime
+
+Maps to `docker run` flags:
+
+```go
+func (d *DockerRuntime) applyResources(config *container.HostConfig, res *api.ResourceSpec) {
+    config.Resources = container.Resources{
+        CPUQuota:  cpuToQuota(res.Limits.CPU),      // --cpu-quota
+        CPUPeriod: 100000,                           // --cpu-period (default 100ms)
+        Memory:    memoryToBytes(res.Limits.Memory), // --memory
+        // Note: Docker doesn't have true "requests", only limits
+        // Requests are advisory for scheduling decisions
+    }
+}
+```
+
+#### Apple Virtualization Runtime
+
+Maps to VM configuration:
+
+```go
+func (a *AppleRuntime) applyResources(vmConfig *vz.VirtualMachineConfiguration, res *api.ResourceSpec) {
+    vmConfig.SetCPUCount(cpuToCores(res.Limits.CPU))
+    vmConfig.SetMemorySize(memoryToBytes(res.Limits.Memory))
+    // Apple VZ doesn't support fine-grained CPU limits like millicores
+    // Round up to nearest whole core
+}
+```
+
+### Harness-Specific Resource Profiles
+
+Adapters can override base resource requirements:
+
+```yaml
+# adapters/claude/adapter.yaml
+harness: claude
+
+# Claude Code benefits from more memory for large contexts
+resources:
+  requests:
+    memory: "1Gi"    # Override base request
+  limits:
+    memory: "8Gi"    # Override base limit
+    # CPU inherits from base
+```
+
+Resource merging follows the layer model:
+```
+Final = Base Resources <- Adapter Resources <- Instance Overrides
+```
+
+### CLI Support
+
+```bash
+# Override resources at start time
+scion start my-agent --template code-reviewer \
+  --cpu-limit 4 \
+  --memory-limit 8Gi
+
+# View resource usage
+scion status my-agent --resources
+# Output:
+#   CPU:    0.45 / 2.00 cores (22%)
+#   Memory: 1.2Gi / 4Gi (30%)
+
+# List agents with resource info
+scion list --wide
+# NAME          TEMPLATE        CPU-REQ  CPU-LIM  MEM-REQ  MEM-LIM  STATUS
+# code-review   code-reviewer   500m     2        512Mi    4Gi      THINKING
+# builder       build-agent     1        4        1Gi      8Gi      EXECUTING
+```
+
+### Hub and Broker Considerations
+
+#### Broker Capacity
+
+Brokers advertise available capacity:
+
+```yaml
+# Broker registration
+broker:
+  id: broker-01
+  capacity:
+    cpu: "16"       # 16 cores total
+    memory: "64Gi"  # 64 GiB total
+  allocated:
+    cpu: "4.5"      # Currently allocated
+    memory: "12Gi"
+```
+
+#### Scheduling
+
+Hub considers resources when assigning agents to brokers:
+
+```go
+func (h *Hub) selectBroker(agent *api.Agent) (*api.Broker, error) {
+    resources := agent.Template.Resources
+
+    for _, broker := range h.availableBrokers(agent.GroveID) {
+        if broker.CanAccommodate(resources) {
+            return broker, nil
+        }
+    }
+
+    return nil, fmt.Errorf("no broker with sufficient capacity for %s (needs %s CPU, %s memory)",
+        agent.Name, resources.Requests.CPU, resources.Requests.Memory)
+}
+```
+
+#### Resource Quotas
+
+Groves can have resource quotas in hosted mode:
+
+```yaml
+# Grove configuration in Hub
+grove:
+  id: my-project
+  quotas:
+    max_agents: 10
+    total_cpu: "32"      # Max 32 cores across all agents
+    total_memory: "128Gi"
+```
+
+### Example Templates
+
+#### Lightweight Review Agent
+
+```yaml
+name: quick-reviewer
+resources:
+  requests:
+    cpu: "100m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "1Gi"
+```
+
+#### Heavy Build Agent
+
+```yaml
+name: build-agent
+resources:
+  requests:
+    cpu: "2"
+    memory: "4Gi"
+  limits:
+    cpu: "8"
+    memory: "16Gi"
+```
+
+#### Research Agent with MCP Servers
+
+```yaml
+name: research-agent
+resources:
+  requests:
+    cpu: "1"
+    memory: "2Gi"
+  limits:
+    cpu: "4"
+    memory: "8Gi"
+# Note: MCP servers run in the same container, consuming these resources
+```
+
+### Open Questions (Resources)
+
+1. **GPU support**: Should we support `nvidia.com/gpu` style resource requests for ML workloads?
+
+2. **Ephemeral storage**: Should templates specify disk requirements beyond the mounted volumes?
+
+3. **Network bandwidth**: Is network QoS relevant for agent workloads?
+
+4. **Resource classes**: Should we support named profiles (e.g., `small`, `medium`, `large`) that map to concrete specs per runtime?
+
+5. **Vertical scaling**: Can running agents have resources adjusted, or only at start time?
