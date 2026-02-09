@@ -411,3 +411,27 @@ func ShowGroveDeletePrompt(groveName string, agentCount int, providers GroveProv
 	// Default NO for safety - destructive operation
 	return ConfirmAction("Delete this grove?", false, autoConfirm)
 }
+
+// ShowBrokerDeletePrompt displays the broker deletion confirmation.
+// groveNames is a list of grove names the broker provides for.
+// Returns true if the user confirms, false otherwise.
+func ShowBrokerDeletePrompt(brokerName string, groveNames []string, autoConfirm bool) bool {
+	fmt.Println()
+	fmt.Printf("This will permanently delete broker '%s' from the Hub.\n", brokerName)
+	fmt.Println()
+
+	if len(groveNames) > 0 {
+		fmt.Printf("This broker provides for %d grove(s):\n", len(groveNames))
+		for _, name := range groveNames {
+			fmt.Printf("  - %s\n", name)
+		}
+		fmt.Println()
+		fmt.Println("The broker will be removed as a provider from all groves.")
+	}
+
+	fmt.Println()
+	fmt.Println("This action cannot be undone.")
+	fmt.Println()
+	// Default NO for safety - destructive operation
+	return ConfirmAction("Delete this broker?", false, autoConfirm)
+}

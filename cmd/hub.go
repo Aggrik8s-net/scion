@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ptone/scion-agent/pkg/apiclient"
+	"github.com/ptone/scion-agent/pkg/brokercredentials"
 	"github.com/ptone/scion-agent/pkg/config"
 	"github.com/ptone/scion-agent/pkg/credentials"
 	"github.com/ptone/scion-agent/pkg/hubclient"
@@ -118,10 +119,53 @@ Examples:
 
 // hubBrokersCmd lists runtime brokers on the Hub
 var hubBrokersCmd = &cobra.Command{
-	Use:   "brokers",
-	Short: "List runtime brokers on the Hub",
-	Long:  `List runtime brokers registered on the Hub.`,
-	RunE:  runHubBrokers,
+	Use:     "brokers",
+	Aliases: []string{"broker"},
+	Short:   "List runtime brokers on the Hub",
+	Long:    `List runtime brokers registered on the Hub.`,
+	RunE:    runHubBrokers,
+}
+
+// hubBrokersInfoCmd shows detailed information about a broker
+var hubBrokersInfoCmd = &cobra.Command{
+	Use:   "info [broker-name]",
+	Short: "Show detailed information about a broker",
+	Long: `Show detailed information about a runtime broker on the Hub.
+
+Displays broker metadata including name, status, version, last heartbeat,
+capabilities, available profiles, and groves it provides for.
+
+If no broker name is provided, the current host's broker is used (if registered).
+
+Examples:
+  # Show info for the current host's broker
+  scion hub brokers info
+
+  # Show info for a broker by name
+  scion hub brokers info my-broker
+
+  # Output as JSON
+  scion hub brokers info my-broker --json`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runHubBrokersInfo,
+}
+
+// hubBrokersDeleteCmd deletes a broker from the Hub
+var hubBrokersDeleteCmd = &cobra.Command{
+	Use:   "delete [broker-name]",
+	Short: "Delete a broker from the Hub",
+	Long: `Delete a runtime broker from the Hub.
+
+This will remove the broker registration and all associated grove provider relationships.
+
+Examples:
+  # Delete a broker by name (with confirmation)
+  scion hub brokers delete my-broker
+
+  # Delete without confirmation
+  scion hub brokers delete my-broker -y`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runHubBrokersDelete,
 }
 
 // hubEnableCmd enables Hub integration
@@ -214,6 +258,10 @@ func init() {
 	hubGrovesCmd.AddCommand(hubGrovesInfoCmd)
 	hubGrovesCmd.AddCommand(hubGrovesDeleteCmd)
 
+	// Broker subcommands
+	hubBrokersCmd.AddCommand(hubBrokersInfoCmd)
+	hubBrokersCmd.AddCommand(hubBrokersDeleteCmd)
+
 	// Common flags
 	hubStatusCmd.Flags().BoolVar(&hubOutputJSON, "json", false, "Output in JSON format")
 	hubGrovesCmd.Flags().BoolVar(&hubOutputJSON, "json", false, "Output in JSON format")
@@ -223,6 +271,10 @@ func init() {
 	hubGrovesInfoCmd.Flags().BoolVar(&hubOutputJSON, "json", false, "Output in JSON format")
 	hubGrovesDeleteCmd.Flags().BoolVarP(&autoConfirm, "yes", "y", false, "Skip confirmation prompt")
 	hubGrovesDeleteCmd.Flags().BoolVar(&hubGrovesDeletePreserveAgents, "preserve-agents", false, "Preserve agents when deleting grove")
+
+	// Broker subcommand flags
+	hubBrokersInfoCmd.Flags().BoolVar(&hubOutputJSON, "json", false, "Output in JSON format")
+	hubBrokersDeleteCmd.Flags().BoolVarP(&autoConfirm, "yes", "y", false, "Skip confirmation prompt")
 }
 
 // authInfo describes the authentication method being used
@@ -1051,6 +1103,253 @@ func runHubBrokers(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func runHubBrokersInfo(cmd *cobra.Command, args []string) error {
+	// Resolve grove path to find project settings
+	resolvedPath, _, err := config.ResolveGrovePath(grovePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve grove path: %w", err)
+	}
+
+	settings, err := config.LoadSettings(resolvedPath)
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
+
+	// Determine broker ID from args or current host's broker
+	var brokerNameOrID string
+	if len(args) > 0 {
+		brokerNameOrID = args[0]
+	} else {
+		// Try to get the current host's broker ID
+		brokerNameOrID = getCurrentHostBrokerID(settings)
+		if brokerNameOrID == "" {
+			return fmt.Errorf("no broker name provided and this host is not registered as a broker.\n\nUsage: scion hub brokers info [broker-name]")
+		}
+	}
+
+	client, err := getHubClient(settings)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Find the broker by name or ID
+	broker, err := resolveBrokerByNameOrID(ctx, client, brokerNameOrID)
+	if err != nil {
+		return err
+	}
+
+	if hubOutputJSON {
+		output := map[string]interface{}{
+			"id":              broker.ID,
+			"name":            broker.Name,
+			"slug":            broker.Slug,
+			"version":         broker.Version,
+			"status":          broker.Status,
+			"connectionState": broker.ConnectionState,
+			"autoProvide":     broker.AutoProvide,
+			"created":         broker.Created,
+			"updated":         broker.Updated,
+		}
+		if !broker.LastHeartbeat.IsZero() {
+			output["lastHeartbeat"] = broker.LastHeartbeat
+		}
+		if broker.Endpoint != "" {
+			output["endpoint"] = broker.Endpoint
+		}
+		if broker.CreatedBy != "" {
+			output["createdBy"] = broker.CreatedBy
+		}
+		if broker.Capabilities != nil {
+			output["capabilities"] = broker.Capabilities
+		}
+		if len(broker.Profiles) > 0 {
+			output["profiles"] = broker.Profiles
+		}
+		if len(broker.Groves) > 0 {
+			output["groves"] = broker.Groves
+		}
+		if len(broker.Labels) > 0 {
+			output["labels"] = broker.Labels
+		}
+		if len(broker.Annotations) > 0 {
+			output["annotations"] = broker.Annotations
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(output)
+	}
+
+	// Text output
+	fmt.Println("Broker Information")
+	fmt.Println("==================")
+	fmt.Printf("ID:          %s\n", broker.ID)
+	fmt.Printf("Name:        %s\n", broker.Name)
+	if broker.Slug != "" && broker.Slug != broker.Name {
+		fmt.Printf("Slug:        %s\n", broker.Slug)
+	}
+	fmt.Printf("Status:      %s\n", valueOrDefault(broker.Status, "unknown"))
+	if broker.ConnectionState != "" {
+		fmt.Printf("Connection:  %s\n", broker.ConnectionState)
+	}
+	if broker.Version != "" {
+		fmt.Printf("Version:     %s\n", broker.Version)
+	}
+	if !broker.LastHeartbeat.IsZero() {
+		fmt.Printf("Last Seen:   %s (%s)\n", formatRelativeTime(broker.LastHeartbeat), broker.LastHeartbeat.Format(time.RFC3339))
+	}
+	if broker.Endpoint != "" {
+		fmt.Printf("Endpoint:    %s\n", broker.Endpoint)
+	}
+	fmt.Printf("Auto-Provide: %v\n", broker.AutoProvide)
+	fmt.Printf("Created:     %s\n", broker.Created.Format(time.RFC3339))
+	if !broker.Updated.IsZero() && broker.Updated != broker.Created {
+		fmt.Printf("Updated:     %s\n", broker.Updated.Format(time.RFC3339))
+	}
+
+	// Show capabilities
+	if broker.Capabilities != nil {
+		fmt.Println()
+		fmt.Println("Capabilities")
+		fmt.Println("------------")
+		fmt.Printf("Web PTY:     %v\n", broker.Capabilities.WebPTY)
+		fmt.Printf("Sync:        %v\n", broker.Capabilities.Sync)
+		fmt.Printf("Attach:      %v\n", broker.Capabilities.Attach)
+	}
+
+	// Show profiles
+	if len(broker.Profiles) > 0 {
+		fmt.Println()
+		fmt.Println("Profiles")
+		fmt.Println("--------")
+		for _, p := range broker.Profiles {
+			availStr := "available"
+			if !p.Available {
+				availStr = "unavailable"
+			}
+			if p.Context != "" || p.Namespace != "" {
+				details := ""
+				if p.Context != "" {
+					details = fmt.Sprintf("context: %s", p.Context)
+				}
+				if p.Namespace != "" {
+					if details != "" {
+						details += ", "
+					}
+					details += fmt.Sprintf("namespace: %s", p.Namespace)
+				}
+				fmt.Printf("  - %s (%s) [%s] %s\n", p.Name, p.Type, availStr, details)
+			} else {
+				fmt.Printf("  - %s (%s) [%s]\n", p.Name, p.Type, availStr)
+			}
+		}
+	} else {
+		fmt.Println()
+		fmt.Println("Profiles: none")
+	}
+
+	// Show groves
+	if len(broker.Groves) > 0 {
+		fmt.Println()
+		fmt.Println("Groves")
+		fmt.Println("------")
+		for _, g := range broker.Groves {
+			fmt.Printf("  - %s (%d agents)\n", g.GroveName, g.AgentCount)
+		}
+	} else {
+		fmt.Println()
+		fmt.Println("Groves: none")
+	}
+
+	return nil
+}
+
+func runHubBrokersDelete(cmd *cobra.Command, args []string) error {
+	// Broker name is required for delete
+	if len(args) == 0 {
+		return fmt.Errorf("broker name or ID is required.\n\nUsage: scion hub brokers delete <broker-name>")
+	}
+
+	brokerNameOrID := args[0]
+
+	// Resolve grove path to find project settings
+	resolvedPath, _, err := config.ResolveGrovePath(grovePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve grove path: %w", err)
+	}
+
+	settings, err := config.LoadSettings(resolvedPath)
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
+
+	client, err := getHubClient(settings)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Find the broker by name or ID
+	broker, err := resolveBrokerByNameOrID(ctx, client, brokerNameOrID)
+	if err != nil {
+		return err
+	}
+
+	// Extract grove names for the confirmation prompt
+	groveNames := make([]string, len(broker.Groves))
+	for i, g := range broker.Groves {
+		groveNames[i] = g.GroveName
+	}
+
+	// Show confirmation prompt
+	if !hubsync.ShowBrokerDeletePrompt(broker.Name, groveNames, autoConfirm) {
+		return fmt.Errorf("deletion cancelled")
+	}
+
+	// Delete the broker
+	if err := client.RuntimeBrokers().Delete(ctx, broker.ID); err != nil {
+		return fmt.Errorf("failed to delete broker: %w", err)
+	}
+
+	fmt.Printf("Broker '%s' deleted successfully.\n", broker.Name)
+	if len(broker.Groves) > 0 {
+		fmt.Printf("Removed from %d grove(s).\n", len(broker.Groves))
+	}
+
+	return nil
+}
+
+// getCurrentHostBrokerID returns the broker ID for the current host, if registered.
+// Checks broker credentials first, then falls back to global settings.
+func getCurrentHostBrokerID(settings *config.Settings) string {
+	// Check broker credentials first
+	credStore := brokercredentials.NewStore("")
+	creds, err := credStore.Load()
+	if err == nil && creds != nil && creds.BrokerID != "" {
+		return creds.BrokerID
+	}
+
+	// Check global settings
+	globalDir, err := config.GetGlobalDir()
+	if err == nil {
+		globalSettings, err := config.LoadSettings(globalDir)
+		if err == nil && globalSettings.Hub != nil && globalSettings.Hub.BrokerID != "" {
+			return globalSettings.Hub.BrokerID
+		}
+	}
+
+	// Check current settings
+	if settings.Hub != nil && settings.Hub.BrokerID != "" {
+		return settings.Hub.BrokerID
+	}
+
+	return ""
 }
 
 func valueOrNone(s string) string {
