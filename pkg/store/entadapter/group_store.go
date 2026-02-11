@@ -24,6 +24,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/ent/agent"
 	"github.com/ptone/scion-agent/pkg/ent/group"
 	"github.com/ptone/scion-agent/pkg/ent/groupmembership"
+	"github.com/ptone/scion-agent/pkg/ent/user"
 	"github.com/ptone/scion-agent/pkg/store"
 )
 
@@ -788,6 +789,108 @@ func (s *GroupStore) GetEffectiveGroupsForAgent(ctx context.Context, agentID str
 				queue = append(queue, p.ID)
 			}
 		}
+	}
+
+	return result, nil
+}
+
+// CheckDelegatedAccess checks whether an agent's delegation relationship
+// satisfies the given policy conditions.
+func (s *GroupStore) CheckDelegatedAccess(ctx context.Context, agentID string, conditions *store.PolicyConditions) (bool, error) {
+	if conditions == nil {
+		return false, nil
+	}
+	if conditions.DelegatedFrom == nil && conditions.DelegatedFromGroup == "" {
+		return false, nil
+	}
+
+	uid, err := parseUUID(agentID)
+	if err != nil {
+		return false, err
+	}
+
+	// Load agent with creator edge
+	a, err := s.client.Agent.Query().
+		Where(agent.IDEQ(uid)).
+		WithCreator().
+		Only(ctx)
+	if err != nil {
+		return false, mapError(err)
+	}
+
+	// Check delegation_enabled flag
+	if !a.DelegationEnabled {
+		return false, nil
+	}
+
+	// Check creator exists
+	creator := a.Edges.Creator
+	if creator == nil {
+		return false, nil
+	}
+
+	// Suspended creators cannot be delegation sources
+	if creator.Status == user.StatusSuspended {
+		return false, nil
+	}
+
+	// Check DelegatedFrom condition (direct creator match)
+	if conditions.DelegatedFrom != nil {
+		if conditions.DelegatedFrom.PrincipalType == "user" &&
+			conditions.DelegatedFrom.PrincipalID == creator.ID.String() {
+			return true, nil
+		}
+		// DelegatedFrom was specified but didn't match
+		return false, nil
+	}
+
+	// Check DelegatedFromGroup condition (creator is in specified group)
+	if conditions.DelegatedFromGroup != "" {
+		creatorGroups, err := s.GetEffectiveGroups(ctx, creator.ID.String())
+		if err != nil {
+			return false, err
+		}
+		for _, gid := range creatorGroups {
+			if gid == conditions.DelegatedFromGroup {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+
+	return false, nil
+}
+
+// GetGroupsByIDs retrieves groups by a list of IDs.
+// Returns only groups that exist; missing IDs are silently skipped.
+func (s *GroupStore) GetGroupsByIDs(ctx context.Context, ids []string) ([]store.Group, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	uuids := make([]uuid.UUID, 0, len(ids))
+	for _, id := range ids {
+		uid, err := parseUUID(id)
+		if err != nil {
+			continue // skip invalid UUIDs
+		}
+		uuids = append(uuids, uid)
+	}
+
+	if len(uuids) == 0 {
+		return nil, nil
+	}
+
+	groups, err := s.client.Group.Query().
+		Where(group.IDIn(uuids...)).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]store.Group, 0, len(groups))
+	for _, g := range groups {
+		result = append(result, *entGroupToStore(g))
 	}
 
 	return result, nil

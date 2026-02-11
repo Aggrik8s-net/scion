@@ -710,6 +710,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v1/policies", s.handlePolicies)
 	s.mux.HandleFunc("/api/v1/policies/", s.handlePolicyRoutes)
 
+	// Principal resolution endpoints (Phase 4)
+	s.mux.HandleFunc("/api/v1/users/me/groups", s.handleMyGroups)
+	s.mux.HandleFunc("/api/v1/principals/", s.handlePrincipalRoutes)
+
 	// Broker registration endpoints (Runtime Broker HMAC authentication)
 	s.mux.HandleFunc("/api/v1/brokers", s.handleBrokersEndpoint)
 	s.mux.HandleFunc("/api/v1/brokers/join", s.handleBrokerJoin)

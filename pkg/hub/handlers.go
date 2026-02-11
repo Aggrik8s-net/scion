@@ -603,6 +603,12 @@ func (s *Server) handleAgentByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Handle groups query
+	if action == "groups" {
+		s.handleAgentGroups(w, r, id)
+		return
+	}
+
 	// Handle actions
 	if action != "" {
 		s.handleAgentAction(w, r, id, action)

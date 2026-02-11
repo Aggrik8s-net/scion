@@ -594,12 +594,21 @@ type Policy struct {
 	CreatedBy string `json:"createdBy,omitempty"`
 }
 
+// DelegatedFromCondition specifies a delegation source for policy matching.
+// When set on a policy, the policy applies to agents whose creator matches.
+type DelegatedFromCondition struct {
+	PrincipalType string `json:"principalType"` // "user"
+	PrincipalID   string `json:"principalId"`   // User UUID
+}
+
 // PolicyConditions provides optional conditional logic for policies.
 type PolicyConditions struct {
-	Labels     map[string]string `json:"labels,omitempty"`     // Resource must have these labels
-	ValidFrom  *time.Time        `json:"validFrom,omitempty"`  // Policy valid from this time
-	ValidUntil *time.Time        `json:"validUntil,omitempty"` // Policy valid until this time
-	SourceIPs  []string          `json:"sourceIps,omitempty"`  // Allowed source IP ranges (CIDR)
+	Labels             map[string]string        `json:"labels,omitempty"`             // Resource must have these labels
+	ValidFrom          *time.Time               `json:"validFrom,omitempty"`          // Policy valid from this time
+	ValidUntil         *time.Time               `json:"validUntil,omitempty"`         // Policy valid until this time
+	SourceIPs          []string                 `json:"sourceIps,omitempty"`          // Allowed source IP ranges (CIDR)
+	DelegatedFrom      *DelegatedFromCondition  `json:"delegatedFrom,omitempty"`      // Match agents delegated from a specific principal
+	DelegatedFromGroup string                   `json:"delegatedFromGroup,omitempty"` // Match agents whose creator is in this group
 }
 
 // PolicyEffect constants

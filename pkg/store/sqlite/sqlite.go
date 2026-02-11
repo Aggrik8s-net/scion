@@ -2830,6 +2830,18 @@ func (s *SQLiteStore) GetEffectiveGroupsForAgent(ctx context.Context, agentID st
 	return nil, nil
 }
 
+// CheckDelegatedAccess is a stub for the SQLite store. Delegation resolution
+// is implemented in the Ent adapter.
+func (s *SQLiteStore) CheckDelegatedAccess(ctx context.Context, agentID string, conditions *store.PolicyConditions) (bool, error) {
+	return false, nil
+}
+
+// GetGroupsByIDs is a stub for the SQLite store. Group retrieval by IDs
+// is implemented in the Ent adapter.
+func (s *SQLiteStore) GetGroupsByIDs(ctx context.Context, ids []string) ([]store.Group, error) {
+	return nil, nil
+}
+
 // ============================================================================
 // Policy Operations
 // ============================================================================

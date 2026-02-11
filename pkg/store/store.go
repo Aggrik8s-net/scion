@@ -437,6 +437,15 @@ type GroupStore interface {
 	// GetEffectiveGroupsForAgent returns all groups an agent belongs to,
 	// including the implicit grove_agents group and transitive parent groups.
 	GetEffectiveGroupsForAgent(ctx context.Context, agentID string) ([]string, error)
+
+	// CheckDelegatedAccess checks whether an agent's delegation relationship
+	// satisfies the given policy conditions. Returns true if the agent has
+	// delegation enabled, its creator is active, and the conditions match.
+	CheckDelegatedAccess(ctx context.Context, agentID string, conditions *PolicyConditions) (bool, error)
+
+	// GetGroupsByIDs retrieves groups by a list of IDs.
+	// Returns only groups that exist; missing IDs are silently skipped.
+	GetGroupsByIDs(ctx context.Context, ids []string) ([]Group, error)
 }
 
 // GroupFilter defines criteria for filtering groups.

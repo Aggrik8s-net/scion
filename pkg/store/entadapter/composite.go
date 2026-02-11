@@ -110,3 +110,11 @@ func (c *CompositeStore) GetGroupByGroveID(ctx context.Context, groveID string) 
 func (c *CompositeStore) GetEffectiveGroupsForAgent(ctx context.Context, agentID string) ([]string, error) {
 	return c.groups.GetEffectiveGroupsForAgent(ctx, agentID)
 }
+
+func (c *CompositeStore) CheckDelegatedAccess(ctx context.Context, agentID string, conditions *store.PolicyConditions) (bool, error) {
+	return c.groups.CheckDelegatedAccess(ctx, agentID, conditions)
+}
+
+func (c *CompositeStore) GetGroupsByIDs(ctx context.Context, ids []string) ([]store.Group, error) {
+	return c.groups.GetGroupsByIDs(ctx, ids)
+}
