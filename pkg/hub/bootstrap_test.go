@@ -116,6 +116,14 @@ func (d *mockDispatcher) DispatchAgentCreate(_ context.Context, agent *store.Age
 	return nil
 }
 
+func (d *mockDispatcher) DispatchAgentProvision(_ context.Context, agent *store.Agent) error {
+	if d.returnErr != nil {
+		return d.returnErr
+	}
+	d.dispatchedAgents = append(d.dispatchedAgents, agent)
+	agent.Status = store.AgentStatusCreated
+	return nil
+}
 func (d *mockDispatcher) DispatchAgentStart(_ context.Context, _ *store.Agent) error { return nil }
 func (d *mockDispatcher) DispatchAgentStop(_ context.Context, _ *store.Agent) error  { return nil }
 func (d *mockDispatcher) DispatchAgentRestart(_ context.Context, _ *store.Agent) error {

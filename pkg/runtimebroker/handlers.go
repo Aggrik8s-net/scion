@@ -367,7 +367,37 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		opts.GrovePath = "" // Prevent git worktree logic in ProvisionAgent
 	}
 
-	// Start the agent
+	// Branch based on provision-only flag
+	if req.ProvisionOnly {
+		// Provision only: set up dirs, worktree, templates without starting the container
+		cfg, err := s.manager.Provision(ctx, opts)
+		if err != nil {
+			RuntimeError(w, "Failed to provision agent: "+err.Error())
+			return
+		}
+
+		// Build a response with "created" status (no container launched)
+		agentResp := &AgentResponse{
+			ID:     req.ID,
+			Slug:   req.Slug,
+			Name:   req.Name,
+			Status: AgentStatusCreated,
+		}
+		if cfg != nil {
+			agentResp.Template = cfg.Harness
+		}
+		if s.runtime != nil {
+			agentResp.RuntimeType = s.runtime.Name()
+		}
+
+		writeJSON(w, http.StatusCreated, CreateAgentResponse{
+			Agent:   agentResp,
+			Created: true,
+		})
+		return
+	}
+
+	// Full start: provision and launch the container
 	agentInfo, err := s.manager.Start(ctx, opts)
 	if err != nil {
 		RuntimeError(w, "Failed to create agent: "+err.Error())
@@ -515,14 +545,47 @@ func (s *Server) handleAgentAction(w http.ResponseWriter, r *http.Request, id, a
 }
 
 func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id string) {
-	// In the current architecture, "start" means resuming a stopped agent.
-	// For now, we return a simple acknowledgment since the manager doesn't
-	// have a separate Start method for existing agents.
-	// TODO: Implement proper agent resume functionality
+	ctx := r.Context()
 
-	writeJSON(w, http.StatusAccepted, map[string]string{
-		"status": "accepted",
+	// Look up the agent to find its grove path
+	agents, err := s.manager.List(ctx, map[string]string{"scion.agent": "true"})
+	if err != nil {
+		RuntimeError(w, "Failed to list agents: "+err.Error())
+		return
+	}
+
+	var existingAgent *api.AgentInfo
+	for i := range agents {
+		if agents[i].Name == id || agents[i].ContainerID == id || agents[i].Slug == id {
+			existingAgent = &agents[i]
+			break
+		}
+	}
+
+	// If no running container found, try to start from provisioned state
+	// by finding the agent's scion-agent.json config file
+	opts := api.StartOptions{
+		Name: id,
+	}
+
+	if existingAgent != nil && existingAgent.GrovePath != "" {
+		opts.GrovePath = existingAgent.GrovePath
+	}
+
+	agentInfo, err := s.manager.Start(ctx, opts)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			NotFound(w, "Agent")
+			return
+		}
+		RuntimeError(w, "Failed to start agent: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{
+		"status":  "accepted",
 		"message": "Start operation accepted",
+		"agent":   AgentInfoToResponse(*agentInfo),
 	})
 }
 

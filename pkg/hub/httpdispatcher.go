@@ -358,17 +358,9 @@ func (d *HTTPAgentDispatcher) getBrokerEndpoint(ctx context.Context, brokerID st
 	return broker.Endpoint, nil
 }
 
-// DispatchAgentCreate creates an agent on the runtime broker.
-func (d *HTTPAgentDispatcher) DispatchAgentCreate(ctx context.Context, agent *store.Agent) error {
-	if agent.RuntimeBrokerID == "" {
-		return fmt.Errorf("agent has no runtime broker assigned")
-	}
-
-	endpoint, err := d.getBrokerEndpoint(ctx, agent.RuntimeBrokerID)
-	if err != nil {
-		return err
-	}
-
+// buildCreateRequest builds a RemoteCreateAgentRequest from the agent's store record.
+// This is shared between DispatchAgentCreate and DispatchAgentProvision.
+func (d *HTTPAgentDispatcher) buildCreateRequest(ctx context.Context, agent *store.Agent, callerName string) (*RemoteCreateAgentRequest, error) {
 	// Look up the local path for this grove on the target runtime broker
 	var grovePath string
 	if agent.GroveID != "" && agent.RuntimeBrokerID != "" {
@@ -407,7 +399,7 @@ func (d *HTTPAgentDispatcher) DispatchAgentCreate(ctx context.Context, agent *st
 	}
 
 	if d.debug {
-		slog.Debug("DispatchAgentCreate",
+		slog.Debug(callerName,
 			"agentName", agent.Name,
 			"hubEndpoint", d.hubEndpoint,
 			"hasTokenGenerator", d.tokenGenerator != nil,
@@ -465,12 +457,11 @@ func (d *HTTPAgentDispatcher) DispatchAgentCreate(ctx context.Context, agent *st
 		}
 	}
 
-	resp, err := d.client.CreateAgent(ctx, agent.RuntimeBrokerID, endpoint, req)
-	if err != nil {
-		return err
-	}
+	return req, nil
+}
 
-	// Update agent with runtime info
+// applyBrokerResponse updates agent fields from the broker's response.
+func (d *HTTPAgentDispatcher) applyBrokerResponse(agent *store.Agent, resp *RemoteAgentResponse) {
 	if resp.Agent != nil {
 		agent.Status = resp.Agent.Status
 		agent.ContainerStatus = resp.Agent.ContainerStatus
@@ -485,7 +476,56 @@ func (d *HTTPAgentDispatcher) DispatchAgentCreate(ctx context.Context, agent *st
 			agent.Runtime = resp.Agent.Runtime
 		}
 	}
+}
 
+// DispatchAgentCreate creates and starts an agent on the runtime broker.
+func (d *HTTPAgentDispatcher) DispatchAgentCreate(ctx context.Context, agent *store.Agent) error {
+	if agent.RuntimeBrokerID == "" {
+		return fmt.Errorf("agent has no runtime broker assigned")
+	}
+
+	endpoint, err := d.getBrokerEndpoint(ctx, agent.RuntimeBrokerID)
+	if err != nil {
+		return err
+	}
+
+	req, err := d.buildCreateRequest(ctx, agent, "DispatchAgentCreate")
+	if err != nil {
+		return err
+	}
+
+	resp, err := d.client.CreateAgent(ctx, agent.RuntimeBrokerID, endpoint, req)
+	if err != nil {
+		return err
+	}
+
+	d.applyBrokerResponse(agent, resp)
+	return nil
+}
+
+// DispatchAgentProvision provisions an agent on the runtime broker without starting it.
+func (d *HTTPAgentDispatcher) DispatchAgentProvision(ctx context.Context, agent *store.Agent) error {
+	if agent.RuntimeBrokerID == "" {
+		return fmt.Errorf("agent has no runtime broker assigned")
+	}
+
+	endpoint, err := d.getBrokerEndpoint(ctx, agent.RuntimeBrokerID)
+	if err != nil {
+		return err
+	}
+
+	req, err := d.buildCreateRequest(ctx, agent, "DispatchAgentProvision")
+	if err != nil {
+		return err
+	}
+	req.ProvisionOnly = true
+
+	resp, err := d.client.CreateAgent(ctx, agent.RuntimeBrokerID, endpoint, req)
+	if err != nil {
+		return err
+	}
+
+	d.applyBrokerResponse(agent, resp)
 	return nil
 }
 

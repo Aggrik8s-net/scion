@@ -17,6 +17,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/ptone/scion-agent/pkg/agent"
@@ -153,6 +154,12 @@ func createAgentViaHub(hubCtx *HubContext, agentName string) error {
 		fmt.Printf("Agent '%s' created via Hub%s.\n", agentName, brokerInfo)
 		fmt.Printf("Agent Slug: %s\n", resp.Agent.Slug)
 		fmt.Printf("Status: %s\n", resp.Agent.Status)
+
+		// For local broker, print the agent directory path so the user can inspect/tweak files
+		if hubCtx.BrokerID != "" && hubCtx.GrovePath != "" {
+			agentDir := filepath.Join(hubCtx.GrovePath, "agents", agentName)
+			fmt.Printf("Agent directory: %s\n", agentDir)
+		}
 	} else {
 		fmt.Printf("Agent '%s' created via Hub.\n", agentName)
 	}

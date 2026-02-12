@@ -115,6 +115,10 @@ type AgentDispatcher interface {
 	// Returns the updated agent info after creation/start.
 	DispatchAgentCreate(ctx context.Context, agent *store.Agent) error
 
+	// DispatchAgentProvision provisions an agent on the runtime broker without starting it.
+	// This sets up directories, worktree, templates, and settings but does not launch the container.
+	DispatchAgentProvision(ctx context.Context, agent *store.Agent) error
+
 	// DispatchAgentStart resumes a stopped agent on the runtime broker.
 	DispatchAgentStart(ctx context.Context, agent *store.Agent) error
 
@@ -187,6 +191,9 @@ type RemoteCreateAgentRequest struct {
 	AgentToken  string             `json:"agentToken,omitempty"`
 	// Attach indicates the agent should start in interactive attach mode (not detached).
 	Attach bool `json:"attach,omitempty"`
+	// ProvisionOnly indicates the agent should be provisioned (dirs, worktree, templates)
+	// but not started. The container will not be launched.
+	ProvisionOnly bool `json:"provisionOnly,omitempty"`
 	// GrovePath is the local filesystem path to the grove on the target runtime broker.
 	// This is looked up from the grove provider record for the target broker.
 	GrovePath string `json:"grovePath,omitempty"`

@@ -74,6 +74,7 @@ type GroveInfo struct {
 
 // Agent status values matching the API specification.
 const (
+	AgentStatusCreated      = "created"
 	AgentStatusPending      = "pending"
 	AgentStatusProvisioning = "provisioning"
 	AgentStatusStarting     = "starting"
@@ -160,6 +161,9 @@ type CreateAgentRequest struct {
 
 	// Attach indicates the agent should start in interactive attach mode (not detached).
 	Attach bool `json:"attach,omitempty"`
+	// ProvisionOnly indicates the agent should be provisioned (dirs, worktree, templates)
+	// but not started. The container will not be launched.
+	ProvisionOnly bool `json:"provisionOnly,omitempty"`
 	// GrovePath is the local filesystem path to the grove on this runtime broker.
 	// This is provided by the Hub from the grove provider record.
 	GrovePath string `json:"grovePath,omitempty"`

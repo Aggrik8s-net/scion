@@ -281,8 +281,8 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If no task is provided, check if the agent already exists.
-	// If it exists and has a prompt.md, restart it. If it doesn't exist,
-	// allow creation (for "scion create" or "scion start -a" flows).
+	// If it exists and has a prompt.md (or is in "created" status), start it.
+	// If it doesn't exist, allow creation (for "scion create" or "scion start -a" flows).
 	if req.Task == "" {
 		slug := api.Slugify(req.Name)
 		existingAgent, err := s.store.GetAgentBySlug(ctx, req.GroveID, slug)
@@ -292,7 +292,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if existingAgent != nil {
-			// Agent exists - check if it has a prompt.md with content
+			// Agent exists - check if it can be started
 			dispatcher := s.GetDispatcher()
 			if dispatcher == nil || existingAgent.RuntimeBrokerID == "" {
 				writeError(w, http.StatusBadRequest, ErrCodeValidationError,
@@ -300,6 +300,8 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
+			// Agents in "created" status were provisioned for later start —
+			// they can be started with prompt.md or attach mode.
 			hasPrompt, err := dispatcher.DispatchCheckAgentPrompt(ctx, existingAgent)
 			if err != nil {
 				writeError(w, http.StatusBadRequest, ErrCodeValidationError,
@@ -313,7 +315,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			// Agent exists and has a prompt - dispatch start action
+			// Agent exists and has a prompt (or attach requested) - dispatch start action
 			if err := dispatcher.DispatchAgentStart(ctx, existingAgent); err != nil {
 				RuntimeError(w, "Failed to start agent: "+err.Error())
 				return
@@ -445,12 +447,13 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If a dispatcher is available and either a task was provided or attach mode is requested,
-	// dispatch the agent to start it immediately.
-	// Without a task or attach, this is a "create only" operation (e.g., scion create).
+	// Dispatch to runtime broker if available.
+	// With a task or attach: full create+start (DispatchAgentCreate).
+	// Without task/attach: provision-only (DispatchAgentProvision) — sets up dirs, worktree,
+	// templates without launching the container.
 	var warnings []string
-	if req.Task != "" || req.Attach {
-		if dispatcher := s.GetDispatcher(); dispatcher != nil {
+	if dispatcher := s.GetDispatcher(); dispatcher != nil {
+		if req.Task != "" || req.Attach {
 			if err := dispatcher.DispatchAgentCreate(ctx, agent); err != nil {
 				// Log the error but don't fail the request - agent is created in Hub
 				warnings = append(warnings, "Failed to dispatch to runtime broker: "+err.Error())
@@ -458,6 +461,16 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 			} else {
 				// Update agent status to reflect it's being started
 				agent.Status = store.AgentStatusProvisioning
+				if err := s.store.UpdateAgent(ctx, agent); err != nil {
+					warnings = append(warnings, "Failed to update agent status: "+err.Error())
+				}
+			}
+		} else {
+			// Provision-only: set up agent filesystem without starting
+			if err := dispatcher.DispatchAgentProvision(ctx, agent); err != nil {
+				warnings = append(warnings, "Failed to provision on runtime broker: "+err.Error())
+			} else {
+				agent.Status = store.AgentStatusCreated
 				if err := s.store.UpdateAgent(ctx, agent); err != nil {
 					warnings = append(warnings, "Failed to update agent status: "+err.Error())
 				}
@@ -1607,8 +1620,8 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 	}
 
 	// If no task is provided, check if the agent already exists.
-	// If it exists and has a prompt.md, restart it. If it doesn't exist,
-	// allow creation (for "scion create" or "scion start -a" flows).
+	// If it exists and has a prompt.md (or is in "created" status), start it.
+	// If it doesn't exist, allow creation (for "scion create" or "scion start -a" flows).
 	if req.Task == "" {
 		slug := api.Slugify(req.Name)
 		existingAgent, err := s.store.GetAgentBySlug(ctx, groveID, slug)
@@ -1618,7 +1631,7 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 		}
 
 		if existingAgent != nil {
-			// Agent exists - check if it has a prompt.md with content
+			// Agent exists - check if it can be started
 			dispatcher := s.GetDispatcher()
 			if dispatcher == nil || existingAgent.RuntimeBrokerID == "" {
 				writeError(w, http.StatusBadRequest, ErrCodeValidationError,
@@ -1626,6 +1639,8 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 				return
 			}
 
+			// Agents in "created" status were provisioned for later start —
+			// they can be started with prompt.md or attach mode.
 			hasPrompt, err := dispatcher.DispatchCheckAgentPrompt(ctx, existingAgent)
 			if err != nil {
 				writeError(w, http.StatusBadRequest, ErrCodeValidationError,
@@ -1639,7 +1654,7 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 				return
 			}
 
-			// Agent exists and has a prompt - dispatch start action
+			// Agent exists and has a prompt (or attach requested) - dispatch start action
 			if err := dispatcher.DispatchAgentStart(ctx, existingAgent); err != nil {
 				RuntimeError(w, "Failed to start agent: "+err.Error())
 				return
@@ -1727,12 +1742,12 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 		return
 	}
 
-	// If a dispatcher is available and either a task was provided or attach mode is requested,
-	// dispatch the agent to start it immediately.
-	// Without a task or attach, this is a "create only" operation (e.g., scion create).
+	// Dispatch to runtime broker if available.
+	// With a task or attach: full create+start (DispatchAgentCreate).
+	// Without task/attach: provision-only (DispatchAgentProvision).
 	var warnings []string
-	if req.Task != "" || req.Attach {
-		if dispatcher := s.GetDispatcher(); dispatcher != nil {
+	if dispatcher := s.GetDispatcher(); dispatcher != nil {
+		if req.Task != "" || req.Attach {
 			if err := dispatcher.DispatchAgentCreate(ctx, agent); err != nil {
 				// Log the error but don't fail the request - agent is created in Hub
 				warnings = append(warnings, "Failed to dispatch to runtime broker: "+err.Error())
@@ -1740,6 +1755,16 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 			} else {
 				// Update agent status to reflect it's being started
 				agent.Status = store.AgentStatusProvisioning
+				if err := s.store.UpdateAgent(ctx, agent); err != nil {
+					warnings = append(warnings, "Failed to update agent status: "+err.Error())
+				}
+			}
+		} else {
+			// Provision-only: set up agent filesystem without starting
+			if err := dispatcher.DispatchAgentProvision(ctx, agent); err != nil {
+				warnings = append(warnings, "Failed to provision on runtime broker: "+err.Error())
+			} else {
+				agent.Status = store.AgentStatusCreated
 				if err := s.store.UpdateAgent(ctx, agent); err != nil {
 					warnings = append(warnings, "Failed to update agent status: "+err.Error())
 				}
