@@ -487,6 +487,48 @@ func TestExpansion(t *testing.T) {
 	}
 }
 
+func TestExpandVolumeMountsPreservesAllFields(t *testing.T) {
+	vols := []api.VolumeMount{
+		{
+			Source:   "/host/path",
+			Target:   "/container/path",
+			ReadOnly: true,
+			Type:     "gcs",
+			Bucket:   "my-bucket",
+			Prefix:   "some/prefix",
+			Mode:     "ro",
+		},
+	}
+
+	expanded := expandVolumeMounts(vols)
+	if len(expanded) != 1 {
+		t.Fatalf("expected 1 volume, got %d", len(expanded))
+	}
+
+	v := expanded[0]
+	if v.Source != "/host/path" {
+		t.Errorf("Source = %q, want /host/path", v.Source)
+	}
+	if v.Target != "/container/path" {
+		t.Errorf("Target = %q, want /container/path", v.Target)
+	}
+	if !v.ReadOnly {
+		t.Error("ReadOnly = false, want true")
+	}
+	if v.Type != "gcs" {
+		t.Errorf("Type = %q, want gcs", v.Type)
+	}
+	if v.Bucket != "my-bucket" {
+		t.Errorf("Bucket = %q, want my-bucket", v.Bucket)
+	}
+	if v.Prefix != "some/prefix" {
+		t.Errorf("Prefix = %q, want some/prefix", v.Prefix)
+	}
+	if v.Mode != "ro" {
+		t.Errorf("Mode = %q, want ro", v.Mode)
+	}
+}
+
 // TestUpdateHubSettingsGlobal tests that hub settings can be saved to global settings.
 // This relates to Fix 5 from progress-report.md: Save hub endpoint to global settings during registration.
 func TestUpdateHubSettingsGlobal(t *testing.T) {

@@ -16,6 +16,8 @@ package api
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -34,6 +36,39 @@ type VolumeMount struct {
 	Bucket   string `json:"bucket,omitempty" yaml:"bucket,omitempty"` // For GCS
 	Prefix   string `json:"prefix,omitempty" yaml:"prefix,omitempty"` // For GCS
 	Mode     string `json:"mode,omitempty" yaml:"mode,omitempty"`     // Mount options
+}
+
+// Validate checks that a VolumeMount has the required fields and valid values.
+func (v VolumeMount) Validate() error {
+	if v.Target == "" {
+		return fmt.Errorf("volume mount missing required field: target")
+	}
+
+	volumeType := strings.ToLower(v.Type)
+	switch volumeType {
+	case "", "local":
+		if v.Source == "" {
+			return fmt.Errorf("local volume mount for target %q missing required field: source", v.Target)
+		}
+	case "gcs":
+		if v.Bucket == "" {
+			return fmt.Errorf("GCS volume mount for target %q missing required field: bucket", v.Target)
+		}
+	default:
+		return fmt.Errorf("volume mount for target %q has invalid type %q (must be \"local\" or \"gcs\")", v.Target, v.Type)
+	}
+
+	return nil
+}
+
+// ValidateVolumes validates a slice of VolumeMount entries.
+func ValidateVolumes(volumes []VolumeMount) error {
+	for i, v := range volumes {
+		if err := v.Validate(); err != nil {
+			return fmt.Errorf("volumes[%d]: %w", i, err)
+		}
+	}
+	return nil
 }
 
 type KubernetesConfig struct {

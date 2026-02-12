@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ptone/scion-agent/pkg/api"
@@ -358,6 +359,83 @@ func TestCloneTemplate(t *testing.T) {
 	if err := CloneTemplate(srcName, destName, false); err == nil {
 		t.Error("expected error when cloning to existing destination, got nil")
 	}
+}
+
+func TestLoadConfigInvalidVolumes(t *testing.T) {
+	t.Run("volumes as object instead of array", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "scion-test-invalid-volumes-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		// Write a config where volumes is an object instead of an array
+		configContent := `{
+			"harness": "gemini",
+			"volumes": {"source": "/foo", "target": "/bar"}
+		}`
+		if err := os.WriteFile(filepath.Join(tmpDir, "scion-agent.json"), []byte(configContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		tpl := &Template{Path: tmpDir}
+		_, err = tpl.LoadConfig()
+		if err == nil {
+			t.Fatal("LoadConfig() expected error for volumes as object, got nil")
+		}
+		// Should fail at JSON parse level since volumes expects an array
+		t.Logf("Got expected error: %v", err)
+	})
+
+	t.Run("volume missing target", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "scion-test-invalid-volumes-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		configContent := `{
+			"harness": "gemini",
+			"volumes": [{"source": "/foo"}]
+		}`
+		if err := os.WriteFile(filepath.Join(tmpDir, "scion-agent.json"), []byte(configContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		tpl := &Template{Path: tmpDir}
+		_, err = tpl.LoadConfig()
+		if err == nil {
+			t.Fatal("LoadConfig() expected error for volume missing target, got nil")
+		}
+		if !strings.Contains(err.Error(), "missing required field: target") {
+			t.Errorf("LoadConfig() error = %q, want containing 'missing required field: target'", err.Error())
+		}
+	})
+
+	t.Run("volume with invalid type", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "scion-test-invalid-volumes-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		configContent := `{
+			"harness": "gemini",
+			"volumes": [{"source": "/foo", "target": "/bar", "type": "nfs"}]
+		}`
+		if err := os.WriteFile(filepath.Join(tmpDir, "scion-agent.json"), []byte(configContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		tpl := &Template{Path: tmpDir}
+		_, err = tpl.LoadConfig()
+		if err == nil {
+			t.Fatal("LoadConfig() expected error for invalid volume type, got nil")
+		}
+		if !strings.Contains(err.Error(), "invalid type") {
+			t.Errorf("LoadConfig() error = %q, want containing 'invalid type'", err.Error())
+		}
+	})
 }
 
 func TestImageFieldLoadingAndMerging(t *testing.T) {

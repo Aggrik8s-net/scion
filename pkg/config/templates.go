@@ -60,6 +60,11 @@ func (t *Template) LoadConfig() (*api.ScionConfig, error) {
 			return nil, fmt.Errorf("failed to parse JSON config %s: %w", configPath, err)
 		}
 	}
+
+	if err := api.ValidateVolumes(cfg.Volumes); err != nil {
+		return nil, fmt.Errorf("invalid volume config in %s: %w", configPath, err)
+	}
+
 	return &cfg, nil
 }
 

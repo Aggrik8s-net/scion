@@ -346,6 +346,8 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 	if updatedCfg, err := tpl.LoadConfig(); err == nil {
 		updatedCfg.Info = finalScionCfg.Info // Re-attach info
 		finalScionCfg = updatedCfg
+	} else {
+		fmt.Fprintf(os.Stderr, "Warning: failed to reload agent config after harness provisioning: %v\n", err)
 	}
 
 	return agentHome, agentWorkspace, finalScionCfg, nil
@@ -502,9 +504,11 @@ func GetAgent(ctx context.Context, agentName string, templateName string, agentI
 	mergedCfg := &api.ScionConfig{}
 	for _, tpl := range chain {
 		tplCfg, err := tpl.LoadConfig()
-		if err == nil {
-			mergedCfg = config.MergeScionConfig(mergedCfg, tplCfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to load config from template %s, skipping: %v\n", tpl.Name, err)
+			continue
 		}
+		mergedCfg = config.MergeScionConfig(mergedCfg, tplCfg)
 	}
 
 	finalCfg := config.MergeScionConfig(mergedCfg, agentCfg)

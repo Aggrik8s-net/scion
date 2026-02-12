@@ -288,6 +288,10 @@ func expandVolumeMounts(volumes []api.VolumeMount) []api.VolumeMount {
 			Source:   s,
 			Target:   t,
 			ReadOnly: v.ReadOnly,
+			Type:     v.Type,
+			Bucket:   v.Bucket,
+			Prefix:   v.Prefix,
+			Mode:     v.Mode,
 		}
 	}
 	return expanded
