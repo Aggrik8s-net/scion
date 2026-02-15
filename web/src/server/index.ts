@@ -22,6 +22,7 @@
 
 import { createApp } from './app.js';
 import { config } from './config.js';
+import { setupWebSocketProxy } from './routes/index.js';
 
 // Create the Koa application
 const app = createApp(config);
@@ -44,6 +45,9 @@ const server = app.listen(config.port, config.host, () => {
     console.info('[DEBUG] Debug logging is enabled. Set SCION_API_DEBUG=false to disable.');
   }
 });
+
+// Set up WebSocket proxy for PTY connections (operates at HTTP server level)
+setupWebSocketProxy(server, config);
 
 // Graceful shutdown handling
 function shutdown(signal: string): void {

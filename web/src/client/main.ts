@@ -46,6 +46,7 @@ import '../components/pages/groves.js';
 import '../components/pages/grove-detail.js';
 import '../components/pages/agents.js';
 import '../components/pages/agent-detail.js';
+import '../components/pages/terminal.js';
 import '../components/pages/not-found.js';
 import '../components/pages/login.js';
 
@@ -76,6 +77,7 @@ async function init(): Promise<void> {
     customElements.whenDefined('scion-page-grove-detail'),
     customElements.whenDefined('scion-page-agents'),
     customElements.whenDefined('scion-page-agent-detail'),
+    customElements.whenDefined('scion-page-terminal'),
     customElements.whenDefined('scion-page-404'),
     customElements.whenDefined('scion-login-page'),
   ]);

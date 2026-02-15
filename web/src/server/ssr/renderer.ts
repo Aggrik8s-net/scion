@@ -45,6 +45,7 @@ import '../../components/pages/groves.js';
 import '../../components/pages/grove-detail.js';
 import '../../components/pages/agents.js';
 import '../../components/pages/agent-detail.js';
+import '../../components/pages/terminal.js';
 import '../../components/pages/not-found.js';
 import '../../components/pages/login.js';
 import '../../components/pages/unauthorized.js';
@@ -110,6 +111,25 @@ export async function renderPage(ctx: RenderContext): Promise<string> {
 
     return getHtmlTemplate({
       title: 'Access Denied',
+      content: componentHtml,
+      initialData,
+      scripts: ['/assets/main.js'],
+      styles: ['/assets/main.css'],
+    });
+  }
+
+  // Terminal page is rendered without the app shell (full-screen layout)
+  const terminalRouteMatch = url.match(/^\/agents\/([^/]+)\/terminal$/);
+  if (terminalRouteMatch) {
+    const agentId = terminalRouteMatch[1];
+    const terminalTemplate = html`
+      <scion-page-terminal .pageData=${initialData} .agentId=${agentId}></scion-page-terminal>
+    `;
+
+    const componentHtml = await collectResult(render(terminalTemplate));
+
+    return getHtmlTemplate({
+      title: 'Terminal',
       content: componentHtml,
       initialData,
       scripts: ['/assets/main.js'],
@@ -195,14 +215,14 @@ function getPageTemplate(url: string, pageData: PageData): TemplateResult {
     return html`<scion-page-agents .pageData=${pageData}></scion-page-agents>`;
   }
 
-  // Agent terminal: /agents/:agentId/terminal (placeholder - will be implemented in M8)
+  // Agent terminal: /agents/:agentId/terminal
   const terminalMatch = url.match(/^\/agents\/([^/]+)\/terminal$/);
   if (terminalMatch) {
     const agentId = terminalMatch[1];
-    return html`<scion-page-agent-detail
+    return html`<scion-page-terminal
       .pageData=${pageData}
       .agentId=${agentId}
-    ></scion-page-agent-detail>`;
+    ></scion-page-terminal>`;
   }
 
   // Agent detail: /agents/:agentId
