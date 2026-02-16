@@ -1,6 +1,6 @@
 # Versioned Settings Refactor: Design & Transition Plan
 
-## Status: Draft (Revised)
+## Status: Draft (Revised — feedback incorporated)
 ## Date: 2026-02-16
 ## Supersedes: `.design/_archive/settings-refactor.md`
 
@@ -51,7 +51,7 @@ server:
       allowed_headers: ["Authorization", "Content-Type", "X-Scion-Broker-Token", "X-Scion-Agent-Token", "X-API-Key"]
       max_age: 3600
     admin_emails: []
-  runtime_broker:
+  broker:
     enabled: false
     port: 9800
     host: "0.0.0.0"
@@ -99,11 +99,12 @@ server:
 ```
 
 **Changes from original draft:**
-- `broker_id` moved from server top-level into `server.runtime_broker` (where it already lives in the current `RuntimeBrokerConfig` struct).
-- `broker_nickname` and `broker_token` moved from `hub` client section (Section 2.2) into `server.runtime_broker`. These fields describe this machine's identity as a broker and are inherently machine-scoped (global-only), not per-grove.
+- `broker_id` moved from server top-level into `server.broker` (where it already lives in the current `RuntimeBrokerConfig` struct).
+- `broker_nickname` and `broker_token` moved from `hub` client section (Section 2.2) into `server.broker`. These fields describe this machine's identity as a broker and are inherently machine-scoped (global-only), not per-grove.
 - `server.hub.endpoint` renamed to `server.hub.public_url` to distinguish from the hub CLIENT endpoint.
-- `server.runtime_broker` now includes `read_timeout`, `write_timeout`, and full CORS settings to match the current `RuntimeBrokerConfig` struct.
+- `server.broker` now includes `read_timeout`, `write_timeout`, and full CORS settings to match the current `RuntimeBrokerConfig` struct.
 - CORS `allowed_headers` defaults updated to match actual code (includes `X-Scion-Broker-Token`, `X-Scion-Agent-Token`, `X-API-Key`).
+- **Renamed** `server.runtime_broker` → `server.broker` for brevity. The current Go struct `RuntimeBrokerConfig` will be renamed to `BrokerConfig` in Phase 4.
 
 **Rationale:** This consolidates the current `GlobalConfig`/`server.yaml` system into the unified settings file. The separate `server.yaml` continues to work during the transition but the canonical location becomes `settings.yaml` under the `server` key.
 
@@ -115,16 +116,15 @@ Settings for connecting to a remote Scion Hub as a client. Valid at global or gr
 hub:
   enabled: true
   endpoint: "https://hub.example.com"   # Hub API URL to connect to (as a client)
-  token: ""                              # bearer token for Hub auth (see Open Question 1)
-  api_key: ""                            # API key for Hub auth (alternative to token)
   grove_id: ""                           # grove identifier from Hub registration
   local_only: false                      # operate in local-only mode even when Hub is configured
-  last_synced_at: ""                     # RFC3339 timestamp of last successful Hub sync (runtime-managed)
 ```
 
 **Changes from original draft:**
-- `broker_id`, `broker_nickname`, `broker_token` moved to `server.runtime_broker` (Section 2.1). Broker identity is per-machine, not per-grove.
-- `last_synced_at` added. This field exists in the current `HubClientConfig` and is written back to settings by the sync logic. It tracks when this grove last synced with the Hub, used to distinguish locally-deleted agents from remotely-created ones.
+- `broker_id`, `broker_nickname`, `broker_token` moved to `server.broker` (Section 2.1). Broker identity is per-machine, not per-grove.
+- `token` removed. Dev-mode authentication uses `server.auth.dev_token` / `server.auth.dev_token_file` (the same mechanism the server uses). In production, OAuth handles authentication. There is no need for a separate hub client token field.
+- `api_key` removed. There is no current or planned support for API key authentication with the Hub.
+- `last_synced_at` moved to `state.yaml` (see Section 2.9). Runtime-managed state should not live in the settings file.
 
 **Note:** The `hub.endpoint` field is the URL this CLI/broker connects to as a Hub client. This is distinct from `server.hub.public_url`, which is the public-facing URL of a Hub server process (used for agent callback URLs). They often have the same value but serve different roles.
 
@@ -281,6 +281,19 @@ active_profile: local
 default_template: gemini           # preserved for backward compatibility
 ```
 
+### 2.9 `state.yaml` (grove-level runtime state)
+
+Runtime-managed state that should not be mixed with user-editable configuration lives in a separate `state.yaml` file. This file is present only in non-global groves (i.e., project-level `.scion/` directories), not in `~/.scion/`.
+
+```yaml
+# .scion/state.yaml (managed by scion, not user-edited)
+last_synced_at: "2026-02-16T10:30:00Z"   # RFC3339 timestamp of last successful Hub sync
+```
+
+**Rationale:** Mixing runtime state with configuration complicates validation, makes `settings.yaml` harder to edit safely, and creates spurious diffs in version-controlled `.scion/` directories. The `state.yaml` file is explicitly excluded from schema validation and is managed programmatically.
+
+**Migration:** The current `hub.last_synced_at` field in `settings.yaml` will be read during migration and relocated to `state.yaml`. The legacy adapter handles this transparently.
+
 ---
 
 ## 3. JSON Schema
@@ -425,13 +438,8 @@ These override values in `settings.yaml`. Prefix: `SCION_`.
 | `grove_id` | `SCION_GROVE_ID` | string |
 | `hub.enabled` | `SCION_HUB_ENABLED` | bool |
 | `hub.endpoint` | `SCION_HUB_ENDPOINT` | string |
-| `hub.token` | `SCION_HUB_TOKEN` | string |
-| `hub.api_key` | `SCION_HUB_API_KEY` | string |
 | `hub.grove_id` | `SCION_HUB_GROVE_ID` | string |
 | `hub.local_only` | `SCION_HUB_LOCAL_ONLY` | bool |
-| `bucket.provider` | `SCION_BUCKET_PROVIDER` | string |
-| `bucket.name` | `SCION_BUCKET_NAME` | string |
-| `bucket.prefix` | `SCION_BUCKET_PREFIX` | string |
 | `cli.autohelp` | `SCION_CLI_AUTOHELP` | bool |
 | `cli.interactive_disabled` | `SCION_CLI_INTERACTIVE_DISABLED` | bool |
 
@@ -451,17 +459,17 @@ These override values in `server.yaml` / `settings.yaml` `server` section. Prefi
 | `server.hub.write_timeout` | `SCION_SERVER_HUB_WRITETIMEOUT` | duration |
 | `server.hub.cors_enabled` | `SCION_SERVER_HUB_CORSENABLED` | bool |
 | `server.hub.admin_emails` | `SCION_SERVER_HUB_ADMINEMAIL` | string (CSV) |
-| **Runtime Broker** | | |
-| `server.runtime_broker.enabled` | `SCION_SERVER_RUNTIMEBROKER_ENABLED` | bool |
-| `server.runtime_broker.port` | `SCION_SERVER_RUNTIMEBROKER_PORT` | int |
-| `server.runtime_broker.host` | `SCION_SERVER_RUNTIMEBROKER_HOST` | string |
-| `server.runtime_broker.read_timeout` | `SCION_SERVER_RUNTIMEBROKER_READTIMEOUT` | duration |
-| `server.runtime_broker.write_timeout` | `SCION_SERVER_RUNTIMEBROKER_WRITETIMEOUT` | duration |
-| `server.runtime_broker.hub_endpoint` | `SCION_SERVER_RUNTIMEBROKER_HUBENDPOINT` | string |
-| `server.runtime_broker.broker_id` | `SCION_SERVER_RUNTIMEBROKER_BROKERID` | string |
-| `server.runtime_broker.broker_name` | `SCION_SERVER_RUNTIMEBROKER_BROKERNAME` | string |
-| `server.runtime_broker.broker_nickname` | `SCION_SERVER_RUNTIMEBROKER_BROKERNICKNAME` | string |
-| `server.runtime_broker.broker_token` | `SCION_SERVER_RUNTIMEBROKER_BROKERTOKEN` | string |
+| **Broker** | | |
+| `server.broker.enabled` | `SCION_SERVER_BROKER_ENABLED` | bool |
+| `server.broker.port` | `SCION_SERVER_BROKER_PORT` | int |
+| `server.broker.host` | `SCION_SERVER_BROKER_HOST` | string |
+| `server.broker.read_timeout` | `SCION_SERVER_BROKER_READTIMEOUT` | duration |
+| `server.broker.write_timeout` | `SCION_SERVER_BROKER_WRITETIMEOUT` | duration |
+| `server.broker.hub_endpoint` | `SCION_SERVER_BROKER_HUBENDPOINT` | string |
+| `server.broker.broker_id` | `SCION_SERVER_BROKER_BROKERID` | string |
+| `server.broker.broker_name` | `SCION_SERVER_BROKER_BROKERNAME` | string |
+| `server.broker.broker_nickname` | `SCION_SERVER_BROKER_BROKERNICKNAME` | string |
+| `server.broker.broker_token` | `SCION_SERVER_BROKER_BROKERTOKEN` | string |
 | **Database** | | |
 | `server.database.driver` | `SCION_SERVER_DATABASE_DRIVER` | string |
 | `server.database.url` | `SCION_SERVER_DATABASE_URL` | string |
@@ -497,7 +505,7 @@ These override values in `server.yaml` / `settings.yaml` `server` section. Prefi
 | `server.log_level` | `SCION_SERVER_LOG_LEVEL` | string |
 | `server.log_format` | `SCION_SERVER_LOG_FORMAT` | string |
 
-**Note on CORS env vars:** The current `envKeyToConfigKey()` function in `hub_config.go` does not have camelCase mappings for CORS-related fields (`corsEnabled`, `corsAllowedOrigins`, etc.). This means CORS settings cannot currently be overridden via environment variables. The versioned settings implementation should add these mappings or switch to snake_case koanf tags.
+**Note on CORS env vars:** The current `envKeyToConfigKey()` function in `hub_config.go` does not have camelCase mappings for CORS-related fields (`corsEnabled`, `corsAllowedOrigins`, etc.). This means CORS settings cannot currently be overridden via environment variables. The versioned settings will switch to snake_case koanf tags throughout, which resolves this issue (Phase 4 deliverable).
 
 ### 4.4 Agent Container Env Vars (runtime-injected)
 
@@ -512,12 +520,14 @@ These are environment variables injected into agent containers by the runtime/br
 | `SCION_CREATOR` | `agent/run.go`, `runtimebroker/handlers.go` | User who created the agent (OS user or Hub email) |
 | `SCION_HOST_UID` | `runtime/common.go` | Host user ID (for file ownership mapping) |
 | `SCION_HOST_GID` | `runtime/common.go` | Host group ID (for file ownership mapping) |
-| `SCION_HUB_URL` | `runtimebroker/handlers.go` | Hub callback URL for agent status reporting (hosted mode) |
+| `SCION_HUB_ENDPOINT` | `runtimebroker/handlers.go` | Hub API endpoint for agent status reporting (hosted mode). Standardized from former `SCION_HUB_URL`. |
 | `SCION_HUB_TOKEN` | `runtimebroker/handlers.go` | Hub auth token for agent callbacks (hosted mode) |
 | `SCION_HOOKS_DIR` | (user-set or default) | Override path for agent lifecycle hooks directory |
 | `SCION_GRACE_PERIOD` | (user-set) | Override container shutdown grace period |
 | `SCION_MODEL` | Harness-specific | Model identifier used by the harness |
 | `SCION_HARNESS` | Harness-specific | Harness type identifier |
+
+**Note on `SCION_HUB_URL` → `SCION_HUB_ENDPOINT` rename:** The former `SCION_HUB_URL` injected into agent containers serves the same purpose as the host-side `SCION_HUB_ENDPOINT` settings override — both identify the Hub API endpoint. The name is standardized to `SCION_HUB_ENDPOINT` everywhere. Code changes required: `runtimebroker/handlers.go` (injection), `sciontool/hub/client.go` (reading), and associated tests.
 
 ### 4.5 Utility / Debug Env Vars
 
@@ -536,6 +546,16 @@ These are standalone environment variables used by the CLI and server binaries f
 | `SCION_DEV_TOKEN` | Dev auth token for Hub/Broker API client authentication |
 | `SCION_DEV_TOKEN_FILE` | Path to file containing dev auth token (fallback: `~/.scion/dev-token`) |
 | `SCION_HUB_STORAGE_BUCKET` | Override Hub storage bucket (used in `cmd/server.go`) |
+
+### 4.5.1 Web Frontend Env Vars
+
+These are environment variables used by the web frontend server (`web/src/server/`). They are not part of the settings schema.
+
+| Env Var | Description |
+|---|---|
+| `SCION_WEB_HUB_API_URL` | Hub API endpoint for the web server's reverse proxy. Defaults to `http://localhost:9810`. Renamed from former `HUB_API_URL` to follow the `SCION_` prefix convention. |
+
+**Note on `HUB_API_URL` rename:** The web server uses this env var to configure its proxy to the Hub API. It is being renamed to `SCION_WEB_HUB_API_URL` to follow the `SCION_` prefix convention and to clarify that this is a web-server-specific setting, distinct from `SCION_HUB_ENDPOINT` (which is the client/agent-side Hub API endpoint). Code change required: `web/src/server/config.ts`.
 
 ### 4.6 LLM Provider Env Vars (pass-through)
 
@@ -577,12 +597,14 @@ func AdaptLegacySettings(legacy *LegacySettings) (*VersionedSettings, []string) 
     // Returns adapted settings + list of deprecation warnings
     // Mapping:
     //   legacy.Harnesses → versioned.HarnessConfigs (name = harness type, harness = name)
-    //   legacy.Bucket → see Open Question 2 (not 1:1 with server.storage)
+    //   legacy.Bucket → versioned.Server.Storage (unified bucket; see Section 8.7)
     //   legacy.GroveID → preserved as-is
     //   legacy.DefaultTemplate → preserved as-is
-    //   legacy.Hub.BrokerID → moved to server.runtime_broker.broker_id (with warning)
-    //   legacy.Hub.BrokerNickname → moved to server.runtime_broker.broker_nickname
-    //   legacy.Hub.BrokerToken → moved to server.runtime_broker.broker_token
+    //   legacy.Hub.Token → dropped (dev auth uses server.auth.dev_token)
+    //   legacy.Hub.BrokerID → moved to server.broker.broker_id (with warning)
+    //   legacy.Hub.BrokerNickname → moved to server.broker.broker_nickname
+    //   legacy.Hub.BrokerToken → moved to server.broker.broker_token
+    //   legacy.Hub.LastSyncedAt → moved to state.yaml (grove-level)
     //   All other fields map 1:1
 }
 ```
@@ -593,9 +615,11 @@ func AdaptLegacySettings(legacy *LegacySettings) (*VersionedSettings, []string) 
 WARNING: Legacy settings format detected in /path/to/settings.yaml
   The following fields are deprecated and will be removed in a future version:
     - "harnesses" → use "harness_configs" with explicit "harness" field
-    - "bucket" → see migration guidance (run 'scion config migrate')
+    - "bucket" → consolidated into "server.storage" (run 'scion config migrate')
+    - "hub.token" → dev auth uses "server.auth.dev_token" / SCION_DEV_TOKEN
+    - "hub.last_synced_at" → moved to state.yaml (grove-level)
     - "hub.broker_id", "hub.broker_nickname", "hub.broker_token"
-        → moved to "server.runtime_broker" (global settings only)
+        → moved to "server.broker" (global settings only)
   Run 'scion config migrate' to automatically update your settings.
 ```
 
@@ -656,17 +680,19 @@ WARNING: Legacy settings format detected in /path/to/settings.yaml
 
 **Deliverables:**
 1. Update `LoadGlobalConfig` to check for `server` key in `settings.yaml` first, falling back to `server.yaml` for backward compatibility.
-2. Add `ServerConfig` struct (mirrors current `GlobalConfig`) to `VersionedSettings`.
-3. Map `SCION_SERVER_*` env vars to `server.*` paths in the unified Koanf loader.
+2. Add `ServerConfig` struct (mirrors current `GlobalConfig`) to `VersionedSettings`. Rename `RuntimeBrokerConfig` → `BrokerConfig`, update koanf tags to `broker` (from `runtimeBroker`/`runtime_broker`).
+3. Map `SCION_SERVER_*` env vars to `server.*` paths in the unified Koanf loader. Support both `SCION_SERVER_RUNTIMEBROKER_*` (legacy) and `SCION_SERVER_BROKER_*` (new) during transition.
 4. When both `server.yaml` and `settings.yaml.server` exist, emit a warning and prefer `settings.yaml`.
 5. Add `scion config migrate --server` to merge `server.yaml` into `settings.yaml`.
 6. Update `scion server` and `scion broker` commands to read from the unified config.
 7. Document that `server.yaml` is deprecated in favor of `settings.yaml` `server` section.
-8. Fix CORS env var mappings — add camelCase entries to `envKeyToConfigKey()` or switch to snake_case tags.
+8. Switch all `GlobalConfig` koanf tags to snake_case. This fixes CORS env var mappings and aligns with the versioned settings convention.
+9. Implement `state.yaml` read/write logic for grove-level runtime state. Migrate `hub.last_synced_at` from `settings.yaml` to `state.yaml` during the migration step.
+10. Remove `hub.token` and `hub.api_key` from settings loading. Update hub client auth to read dev token from `server.auth.dev_token` / `SCION_DEV_TOKEN` / `~/.scion/dev-token` (already partially implemented). In production, OAuth handles auth.
 
-### Phase 5: New Feature Gates
+### Phase 5: New Feature Gates & Env Var Standardization
 
-**Goal:** Implement features that are gated on versioned settings.
+**Goal:** Implement features gated on versioned settings and standardize env var naming.
 
 **Deliverables:**
 1. **`max_turns`**: In the agent runner, check `scionConfig.MaxTurns`. Only available when `schema_version >= 1` in the agent template. If the agent's harness supports turn counting (requires harness-level support), enforce the limit by sending a stop signal.
@@ -674,6 +700,8 @@ WARNING: Legacy settings format detected in /path/to/settings.yaml
 3. **`cli.interactive_disabled`**: Check this setting in interactive prompts (attach, confirmations). When `true`, skip prompts and use defaults or fail with an error.
 4. **Named harness configs**: With `harness_configs` fully wired, users can create agents with `scion create --harness-config gemini-high-security myagent`.
 5. **Runtime type field**: Runtimes with explicit `type` fields resolve correctly through the factory.
+6. **Standardize `SCION_HUB_URL` → `SCION_HUB_ENDPOINT`**: Update `runtimebroker/handlers.go` to inject `SCION_HUB_ENDPOINT` instead of `SCION_HUB_URL`. Update `sciontool/hub/client.go` to read `SCION_HUB_ENDPOINT`. Support reading the legacy `SCION_HUB_URL` as fallback during transition.
+7. **Rename `HUB_API_URL` → `SCION_WEB_HUB_API_URL`**: Update `web/src/server/config.ts` to read `SCION_WEB_HUB_API_URL` (falling back to `HUB_API_URL` for backward compat). This aligns the web server env var with the `SCION_` prefix convention.
 
 ### Phase 6: Migration Tooling & Cleanup
 
@@ -689,6 +717,28 @@ WARNING: Legacy settings format detected in /path/to/settings.yaml
 3. Implement `scion config migrate --dry-run` for preview.
 4. Update documentation (`docs-site/`) with new settings reference.
 5. After a release cycle, remove the `LegacySettingsAdapter` and legacy loading path (Phase 2 code), making versioned settings the only supported format.
+
+### Phase 7: Unified Storage Consolidation
+
+**Goal:** Consolidate all GCS storage usage (templates, workspaces, volumes) into a single bucket with path-based namespacing.
+
+**Context:** Currently, `Settings.Bucket` (client-side workspace persistence) and `GlobalConfig.Storage` (server-side template/asset storage) are separate configs pointing at potentially different buckets. The desired end state is a single bucket with all storage namespaced under different path prefixes.
+
+**Deliverables:**
+1. Design the unified path layout within a single GCS bucket:
+   ```
+   <bucket>/
+     templates/               # template assets (currently server.storage)
+     workspaces/<grove>/<agent>/  # agent workspace persistence (currently Settings.Bucket)
+     volumes/                 # volume data
+   ```
+2. Extend `server.storage` to support the unified layout with configurable path prefixes.
+3. Refactor workspace persistence code (`pkg/agent/`) to use `server.storage` instead of `Settings.Bucket`.
+4. Refactor template storage code (`pkg/hub/`) to use path-prefixed storage within the same bucket.
+5. Deprecate the top-level `bucket` setting. The migration adapter maps `legacy.Bucket` into the unified `server.storage` config.
+6. Update GCS client code to support path-prefix-based namespacing within a single bucket.
+
+**Note:** This is a more substantial code refactor than other phases. It affects the storage layer across both client and server code paths. The settings structure should be defined in earlier phases even if the underlying code refactor happens here.
 
 ---
 
@@ -712,6 +762,7 @@ WARNING: Legacy settings format detected in /path/to/settings.yaml
   settings.yaml              # VersionedSettings with schema_version, includes server section
 .scion/
   settings.yaml              # grove-level VersionedSettings (no server section)
+  state.yaml                 # grove-level runtime state (last_synced_at, etc.)
   templates/
     gemini/
       scion-agent.yaml       # agent config with schema_version
@@ -741,9 +792,21 @@ Semantic versioning (major.minor.patch) is overkill for a settings schema. A sim
 
 JSON Schema is language-neutral and can be used by IDEs (via `$schema` in YAML) for autocompletion and validation. It serves as documentation, validation specification, and tooling integration in one artifact. Go code validates against it at runtime using an embedded validator library.
 
-### 8.6 Why move broker identity from `hub` to `server.runtime_broker`?
+### 8.6 Why move broker identity from `hub` to `server.broker`?
 
-Broker identity (`broker_id`, `broker_nickname`, `broker_token`) describes **this machine's** role as a compute broker. It is inherently per-machine, not per-grove. Placing it under `server.runtime_broker` (which is global-only) correctly scopes it. The previous placement under `hub` (which allows grove-level overrides) was a historical artifact of the broker registering through the hub client.
+Broker identity (`broker_id`, `broker_nickname`, `broker_token`) describes **this machine's** role as a compute broker. It is inherently per-machine, not per-grove. Placing it under `server.broker` (which is global-only) correctly scopes it. The previous placement under `hub` (which allows grove-level overrides) was a historical artifact of the broker registering through the hub client.
+
+### 8.7 Why consolidate all storage into one bucket?
+
+A server should only have one GCS bucket configured. Templates, workspaces, volumes, and other stored data are all namespaced under different path prefixes within that bucket. This avoids the current split between `Settings.Bucket` (client-side workspace persistence) and `GlobalConfig.Storage` (server-side templates). The unified approach is simpler to configure, easier to secure (one set of permissions), and reduces the number of env vars and settings fields. See Phase 7 for the implementation plan.
+
+### 8.8 Why remove `hub.token` and consolidate into `server.auth.dev_token`?
+
+The `hub.token` field stored a bearer token used for Hub API authentication. In practice, this was always a dev token — the same token configured on the server side via `server.auth.dev_token`. Having two separate token fields (`hub.token` on the client, `server.auth.dev_token` on the server) for what is semantically the same value creates confusion. In production, OAuth handles authentication and no static token is needed. Consolidating to a single `server.auth.dev_token` / `SCION_DEV_TOKEN` makes it clear this mechanism is for development only.
+
+### 8.9 Why separate runtime state into `state.yaml`?
+
+Runtime-managed state (like `last_synced_at`) is written programmatically and should not be mixed with user-editable configuration. Keeping it in `settings.yaml` complicates schema validation, creates noisy diffs in version-controlled directories, and makes it unclear which fields are safe to edit. A separate `state.yaml` (grove-level only, not in `~/.scion/`) cleanly separates concerns.
 
 ---
 
@@ -756,8 +819,11 @@ Broker identity (`broker_id`, `broker_nickname`, `broker_token`) describes **thi
 | `server.yaml` users don't notice the deprecation | Two config files drift out of sync | Emit a deprecation warning on every server start when `server.yaml` exists |
 | Named harness configs break profile override resolution | Wrong harness config selected | Profile `harness_overrides` keys match harness-config names, not harness types. Document this clearly |
 | Koanf deep merge behavior changes between legacy and versioned structs | Subtle config differences | Test merge behavior exhaustively with multi-layer configs |
-| Moving broker identity from `hub` to `server.runtime_broker` breaks save logic | Broker registration writes to wrong location | Migration adapter must detect and relocate these fields; `SaveSettings` must handle the new location |
-| CORS env vars don't work in current code | Server CORS can't be configured via env | Add missing camelCase mappings or switch to snake_case (Phase 4 deliverable) |
+| Moving broker identity from `hub` to `server.broker` breaks save logic | Broker registration writes to wrong location | Migration adapter must detect and relocate these fields; `SaveSettings` must handle the new location |
+| CORS env vars don't work in current code | Server CORS can't be configured via env | Switch to snake_case koanf tags (Phase 4 deliverable) |
+| Removing `hub.token` breaks existing dev setups | Users can't authenticate with Hub after upgrade | Migration emits clear warning; `SCION_DEV_TOKEN` env var and `~/.scion/dev-token` file continue to work as before |
+| Unified storage refactor touches multiple code paths | Risk of data loss or broken storage | Phase 7 is independent; can be deferred without blocking other phases. Thorough integration tests required |
+| `SCION_HUB_URL` → `SCION_HUB_ENDPOINT` rename breaks running agents | Agents in containers can't reach Hub | Support reading both env vars with fallback during transition (Phase 5 deliverable) |
 
 ---
 
@@ -769,7 +835,9 @@ Broker identity (`broker_id`, `broker_nickname`, `broker_token`) describes **thi
 - Legacy adapter: every field in `Settings` maps correctly to `VersionedSettings`.
 - Resolution: `ResolveHarnessConfig` with default names, named variants, profile overrides.
 - Env var mapping: every `x-env-var` in the schema is honored by the Koanf loader.
-- Broker identity migration: fields move from `hub` to `server.runtime_broker` correctly.
+- Broker identity migration: fields move from `hub` to `server.broker` correctly.
+- State file: `last_synced_at` reads from and writes to `state.yaml`, not `settings.yaml`.
+- Dev token consolidation: hub client auth reads `server.auth.dev_token` / `SCION_DEV_TOKEN`.
 
 ### Integration Tests
 - Round-trip: write a `VersionedSettings` to YAML, reload it, compare.
@@ -783,90 +851,74 @@ Broker identity (`broker_id`, `broker_nickname`, `broker_token`) describes **thi
 
 ---
 
-## 11. Open Questions
+## 11. Resolved Questions
 
-### OQ-1: Should `hub.token` be renamed to `hub.dev_token`?
+The following questions were raised during design review and have been resolved.
 
-**Context:** The current `hub.token` / `SCION_HUB_TOKEN` stores a bearer token for Hub authentication. In practice, this is typically a dev token issued by the server's dev auth system. The original feedback suggested renaming it to `dev_token` to make this explicit.
+### RQ-1: `hub.token` consolidated into `server.auth.dev_token`
 
-**Arguments for renaming:**
-- Clarifies that this is for development/manual auth, not production OAuth flows.
-- Avoids confusion with `server.auth.dev_token` (the server-side dev token).
-- Makes it clear that production deployments should use OAuth, not static tokens.
+**Decision:** Remove `hub.token` from the hub client settings. All dev-mode authentication uses `server.auth.dev_token` / `server.auth.dev_token_file` / `SCION_DEV_TOKEN` / `~/.scion/dev-token`. This token should only ever be used in development; production deployments use OAuth.
 
-**Arguments against:**
-- The field could hold *any* bearer token (including service account tokens or personal access tokens if those are added later). `dev_token` is too restrictive.
-- Breaking change: `SCION_HUB_TOKEN` is widely used and documented.
-- Creates a second `dev_token` field alongside `server.auth.dev_token`, which may be more confusing.
+**Code impact:** Hub client auth code must be updated to read dev token from `server.auth.dev_token` instead of `hub.token`. The `SCION_HUB_TOKEN` env var remains supported for container injection (Section 4.4) where the broker passes a token to agents, but is no longer a settings override. See Phase 4, item 10.
 
-**Recommendation:** Keep as `token` with documentation clarifying its typical use as a dev auth token. Revisit when a formal access token mechanism is added.
+### RQ-2: Unified storage — one bucket, path-namespaced
 
-### OQ-2: What is the migration path for `Settings.Bucket`?
+**Decision:** A server should have a single GCS bucket for all storage needs (templates, workspaces, volumes). Different data types are namespaced under path prefixes within that bucket. The current split between `Settings.Bucket` (client workspace persistence) and `GlobalConfig.Storage` (server template storage) will be unified.
 
-**Context:** The current `Settings` struct has a top-level `Bucket` field (`BucketConfig` with `Provider`, `Name`, `Prefix`) that configures cloud storage for agent workspace persistence. The design doc originally proposed moving this to `server.storage`. However, `server.storage` (`StorageConfig` with `Provider`, `Bucket`, `LocalPath`) serves a different purpose — it's the server's template/asset storage backend.
+**Code impact:** This is a substantial refactor affecting storage code across both client and server. Deferred to Phase 7 as an independent workstream. The settings structure captures the desired end state; the legacy `bucket` field is preserved during transition.
 
-**Differences:**
-- `Settings.Bucket`: Client/grove-level. Used for persisting agent workspace data to GCS.
-- `GlobalConfig.Storage`: Server-level. Used for storing templates and assets.
+### RQ-3: Runtime state moved to `state.yaml`
 
-**Options:**
-1. Keep `bucket` as a separate top-level setting in versioned settings.
-2. Move it into a new `storage` section at the grove level (distinct from `server.storage`).
-3. Fold it into the `volumes` system with GCS volume mounts.
-4. Drop it entirely if the feature is underused.
+**Decision:** `hub.last_synced_at` and future runtime-managed state moves to a separate `state.yaml` file, present only in non-global groves (project-level `.scion/` directories). See Section 2.9.
 
-**Status:** Needs investigation into actual usage patterns before deciding.
+**Code impact:** Sync logic must be updated to read/write `state.yaml` instead of `settings.yaml`. See Phase 4, item 9.
 
-### OQ-3: How should `hub.last_synced_at` be handled as runtime state?
+### RQ-4: `server.hub.public_url` env var — support both names
 
-**Context:** `last_synced_at` is not a user-configured setting — it's runtime state written back to the settings file by the sync logic. Mixing runtime state with configuration in the same file is an anti-pattern that complicates validation and editing.
+**Decision:** Support both `SCION_SERVER_HUB_ENDPOINT` (legacy) and `SCION_SERVER_HUB_PUBLIC_URL` (new) during the transition period.
 
-**Options:**
-1. Keep it in `settings.yaml` (status quo, simple, but impure).
-2. Move it to a separate state file (e.g., `~/.scion/state.yaml` or `.scion/state.yaml`).
-3. Store it in a lightweight local database or key-value store.
+**Note:** The purpose of storing the Hub's own endpoint on the server configuration may need further investigation and cleanup. Currently `server.hub.public_url` is used to construct agent callback URLs (so agents know where to report status). Whether this should be auto-detected or configured differently is a future consideration.
 
-**Recommendation:** Keep in settings for now (pragmatic), but add `"x-runtime-managed": true` annotation in the schema to indicate this field shouldn't be manually edited. Consider extracting runtime state to a separate file if more runtime-managed fields are added in the future.
+### RQ-5: `server.runtime_broker` shortened to `server.broker`
 
-### OQ-4: Env var naming for the `server.hub.public_url` rename
+**Decision:** Rename to `server.broker`. The Go struct `RuntimeBrokerConfig` will be renamed to `BrokerConfig` in Phase 4. The shorter name matches common usage.
 
-**Context:** The current env var `SCION_SERVER_HUB_ENDPOINT` maps to the `hub.endpoint` field in `GlobalConfig.Hub`. The design doc renames this to `server.hub.public_url`. Should the env var also be renamed?
+### RQ-6: CORS env vars fixed via snake_case migration
 
-**Options:**
-1. Keep `SCION_SERVER_HUB_ENDPOINT` for backward compatibility (document that it maps to `public_url`).
-2. Rename to `SCION_SERVER_HUB_PUBLIC_URL` and add a deprecation shim for the old name.
-3. Support both during the transition period.
+**Decision:** Switch all `GlobalConfig` koanf tags to snake_case as part of Phase 4. This fixes the CORS env var mapping bug and aligns with the versioned settings convention. No camelCase shim needed since the env var names themselves don't change (they map to lowercase anyway).
 
-**Recommendation:** Keep `SCION_SERVER_HUB_ENDPOINT` (option 1). The env var doesn't need to match the YAML field name exactly, and changing env vars is more disruptive than changing YAML keys.
+### RQ-7: `SCION_HUB_URL` standardized to `SCION_HUB_ENDPOINT`
 
-### OQ-5: Should `server.runtime_broker` be shortened to `server.broker`?
+**Decision:** Standardize on `SCION_HUB_ENDPOINT` everywhere. The container-injected env var (formerly `SCION_HUB_URL`) serves the same purpose as the host-side settings override — both identify the Hub API endpoint. Code changes in `runtimebroker/handlers.go` and `sciontool/hub/client.go` (Phase 5, items 6-7). `SCION_HUB_URL` is supported as a fallback during transition.
 
-**Context:** The current struct is `RuntimeBrokerConfig` and the YAML key is `runtimeBroker` / `runtime_broker`. This is verbose. The feedback originally suggested "broker" as the section name.
+**Additional:** The web frontend env var `HUB_API_URL` (used for the web server's reverse proxy to the Hub API) is renamed to `SCION_WEB_HUB_API_URL` to follow the `SCION_` prefix convention and distinguish from `SCION_HUB_ENDPOINT`. See Section 4.5.1.
 
-**Arguments for `server.broker`:** Shorter, cleaner, matches common usage (users say "broker" not "runtime broker").
+---
 
-**Arguments for `server.runtime_broker`:** Maintains consistency with the current naming. Distinguishes from other possible broker types if the concept evolves.
+## 12. Code Refactors Required
 
-**Status:** Low priority. Can be decided during Phase 4 implementation.
+This section summarizes code changes implied by the design decisions, organized by the phase in which they should be addressed.
 
-### OQ-6: CORS env var mapping is broken in current code
+### Phase 4 Code Changes (Server Config Consolidation)
+| Change | Files Affected | Scope |
+|---|---|---|
+| Rename `RuntimeBrokerConfig` → `BrokerConfig` | `pkg/config/`, `pkg/runtimebroker/`, `cmd/broker.go` | Medium — struct rename + tag updates |
+| Switch all `GlobalConfig` koanf tags to snake_case | `pkg/config/hub_config.go`, `pkg/config/global_config.go` | Medium — fixes CORS env vars |
+| Remove `hub.token` from settings; update hub client auth | `pkg/config/settings.go`, `pkg/hubclient/`, `pkg/config/koanf.go` | Medium — auth flow change |
+| Implement `state.yaml` read/write | `pkg/config/` (new file), `pkg/hubclient/sync.go` | Medium — new file handling |
+| Support legacy `SCION_SERVER_RUNTIMEBROKER_*` env vars as fallback | `pkg/config/koanf.go` or new loader | Small — env var aliasing |
 
-**Context:** The `envKeyToConfigKey()` function in `hub_config.go` maps env var suffixes to koanf keys. It has camelCase mappings for fields like `clientId`, `brokerId`, `devMode`, etc. However, CORS-related fields (`corsEnabled`, `corsAllowedOrigins`, `corsAllowedMethods`, `corsAllowedHeaders`, `corsMaxAge`) are NOT in the mapping table.
+### Phase 5 Code Changes (Feature Gates & Env Var Standardization)
+| Change | Files Affected | Scope |
+|---|---|---|
+| `SCION_HUB_URL` → `SCION_HUB_ENDPOINT` in container injection | `pkg/runtimebroker/handlers.go`, tests | Small |
+| `SCION_HUB_URL` → `SCION_HUB_ENDPOINT` in sciontool reader | `pkg/sciontool/hub/client.go`, tests | Small |
+| `HUB_API_URL` → `SCION_WEB_HUB_API_URL` in web server | `web/src/server/config.ts` | Small |
 
-This means env vars like `SCION_SERVER_HUB_CORSENABLED` would produce the koanf key `hub.corsenabled` instead of `hub.corsEnabled`, silently failing to override the setting.
-
-**Resolution:** This is a pre-existing bug that should be fixed regardless of the versioned settings refactor. Either:
-1. Add the missing camelCase entries to `envKeyToConfigKey()`.
-2. Switch the `GlobalConfig` struct's koanf tags to snake_case (aligned with the versioned settings approach).
-
-Option 2 is preferred and should be done as part of Phase 4.
-
-### OQ-7: Inconsistency between `SCION_HUB_URL` and `SCION_HUB_ENDPOINT`
-
-**Context:** Two different env vars exist for what appears to be the same concept:
-- `SCION_HUB_ENDPOINT`: Used in `settings.yaml` loading (`koanf.go`) to override `hub.endpoint`.
-- `SCION_HUB_URL`: Used in `runtimebroker/handlers.go` and `sciontool` to tell agents where the Hub is.
-
-`SCION_HUB_URL` is injected into agent containers at runtime (Section 4.4) and is read by `sciontool` inside the container. `SCION_HUB_ENDPOINT` is a settings override on the host.
-
-**Resolution:** These serve different purposes (host-side setting override vs container-injected runtime config) but the naming is confusing. Document clearly and consider aligning in a future version. The versioned settings should keep `SCION_HUB_ENDPOINT` for the client setting and `SCION_HUB_URL` for the container injection.
+### Phase 7 Code Changes (Unified Storage — substantial refactor)
+| Change | Files Affected | Scope |
+|---|---|---|
+| Consolidate `BucketConfig` and `StorageConfig` | `pkg/config/settings.go`, `pkg/config/global_config.go` | Large |
+| Refactor workspace persistence to use unified storage | `pkg/agent/`, `pkg/runtime/` | Large |
+| Refactor template storage to use path-prefixed storage | `pkg/hub/storage/` | Large |
+| Add path-prefix namespacing to GCS client | `pkg/hub/storage/gcs.go` (or equivalent) | Medium |

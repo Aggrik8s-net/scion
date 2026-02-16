@@ -47,7 +47,7 @@
           "x-since": "1"
         },
         "hub": { "$ref": "#/$defs/serverHub" },
-        "runtime_broker": { "$ref": "#/$defs/serverRuntimeBroker" },
+        "broker": { "$ref": "#/$defs/serverBroker" },
         "database": { "$ref": "#/$defs/serverDatabase" },
         "auth": { "$ref": "#/$defs/serverAuth" },
         "oauth": { "$ref": "#/$defs/serverOAuth" },
@@ -72,7 +72,7 @@
     },
     "hub": {
       "type": "object",
-      "description": "Hub client connection settings.",
+      "description": "Hub client connection settings. Auth uses server.auth.dev_token (dev mode) or OAuth (production).",
       "x-scope": "any",
       "x-since": "1",
       "properties": {
@@ -89,20 +89,6 @@
           "x-env-var": "SCION_HUB_ENDPOINT",
           "x-since": "1"
         },
-        "token": {
-          "type": "string",
-          "description": "Bearer token for Hub authentication (typically a dev token; see Open Question 1).",
-          "x-env-var": "SCION_HUB_TOKEN",
-          "x-sensitive": true,
-          "x-since": "1"
-        },
-        "api_key": {
-          "type": "string",
-          "description": "API key for Hub authentication (alternative to token).",
-          "x-env-var": "SCION_HUB_API_KEY",
-          "x-sensitive": true,
-          "x-since": "1"
-        },
         "grove_id": {
           "type": "string",
           "description": "Grove identifier when registered with the Hub.",
@@ -113,12 +99,6 @@
           "type": "boolean",
           "description": "Operate in local-only mode even when Hub is configured. Hub sync checks will error with guidance to use --no-hub.",
           "x-env-var": "SCION_HUB_LOCAL_ONLY",
-          "x-since": "1"
-        },
-        "last_synced_at": {
-          "type": "string",
-          "format": "date-time",
-          "description": "RFC3339 timestamp of the last successful Hub sync. Runtime-managed; not typically set by users.",
           "x-since": "1"
         }
       },
@@ -332,8 +312,9 @@
         "public_url": {
           "type": "string",
           "format": "uri",
-          "description": "Public-facing URL for this Hub server. Passed to agents for status callbacks. Not the same as hub.endpoint (client-side).",
-          "x-env-var": "SCION_SERVER_HUB_ENDPOINT"
+          "description": "Public-facing URL for this Hub server. Passed to agents for status callbacks. Not the same as hub.endpoint (client-side). Note: the purpose of this field may need further investigation and cleanup.",
+          "x-env-var": "SCION_SERVER_HUB_ENDPOINT",
+          "x-env-var-alias": "SCION_SERVER_HUB_PUBLIC_URL"
         },
         "read_timeout": { "type": "string", "default": "30s", "x-env-var": "SCION_SERVER_HUB_READTIMEOUT" },
         "write_timeout": { "type": "string", "default": "60s", "x-env-var": "SCION_SERVER_HUB_WRITETIMEOUT" },
@@ -346,41 +327,41 @@
         }
       }
     },
-    "serverRuntimeBroker": {
+    "serverBroker": {
       "type": "object",
-      "description": "Runtime Broker API server and identity settings.",
+      "description": "Broker API server and identity settings. Renamed from serverRuntimeBroker.",
       "properties": {
-        "enabled": { "type": "boolean", "default": false, "x-env-var": "SCION_SERVER_RUNTIMEBROKER_ENABLED" },
-        "port": { "type": "integer", "default": 9800, "x-env-var": "SCION_SERVER_RUNTIMEBROKER_PORT" },
-        "host": { "type": "string", "default": "0.0.0.0", "x-env-var": "SCION_SERVER_RUNTIMEBROKER_HOST" },
-        "read_timeout": { "type": "string", "default": "30s", "x-env-var": "SCION_SERVER_RUNTIMEBROKER_READTIMEOUT" },
-        "write_timeout": { "type": "string", "default": "120s", "x-env-var": "SCION_SERVER_RUNTIMEBROKER_WRITETIMEOUT" },
+        "enabled": { "type": "boolean", "default": false, "x-env-var": "SCION_SERVER_BROKER_ENABLED" },
+        "port": { "type": "integer", "default": 9800, "x-env-var": "SCION_SERVER_BROKER_PORT" },
+        "host": { "type": "string", "default": "0.0.0.0", "x-env-var": "SCION_SERVER_BROKER_HOST" },
+        "read_timeout": { "type": "string", "default": "30s", "x-env-var": "SCION_SERVER_BROKER_READTIMEOUT" },
+        "write_timeout": { "type": "string", "default": "120s", "x-env-var": "SCION_SERVER_BROKER_WRITETIMEOUT" },
         "hub_endpoint": {
           "type": "string",
           "format": "uri",
           "description": "Hub API endpoint for this broker to report status to.",
-          "x-env-var": "SCION_SERVER_RUNTIMEBROKER_HUBENDPOINT"
+          "x-env-var": "SCION_SERVER_BROKER_HUBENDPOINT"
         },
         "broker_id": {
           "type": "string",
           "description": "Unique broker identifier (UUID). Auto-generated if empty.",
-          "x-env-var": "SCION_SERVER_RUNTIMEBROKER_BROKERID"
+          "x-env-var": "SCION_SERVER_BROKER_BROKERID"
         },
         "broker_name": {
           "type": "string",
           "description": "Human-readable broker name.",
-          "x-env-var": "SCION_SERVER_RUNTIMEBROKER_BROKERNAME"
+          "x-env-var": "SCION_SERVER_BROKER_BROKERNAME"
         },
         "broker_nickname": {
           "type": "string",
           "description": "Human-readable display name for the broker. Defaults to hostname.",
-          "x-env-var": "SCION_SERVER_RUNTIMEBROKER_BROKERNICKNAME"
+          "x-env-var": "SCION_SERVER_BROKER_BROKERNICKNAME"
         },
         "broker_token": {
           "type": "string",
           "description": "Token received when registering this broker with the Hub.",
           "x-sensitive": true,
-          "x-env-var": "SCION_SERVER_RUNTIMEBROKER_BROKERTOKEN"
+          "x-env-var": "SCION_SERVER_BROKER_BROKERTOKEN"
         },
         "cors": { "$ref": "#/$defs/corsConfig" }
       }
@@ -414,9 +395,15 @@
     },
     "serverAuth": {
       "type": "object",
+      "description": "Auth settings. dev_token/dev_token_file are used by both the server (to accept) and the hub client (to send) in dev mode.",
       "properties": {
         "dev_mode": { "type": "boolean", "default": false, "x-env-var": "SCION_SERVER_AUTH_DEVMODE" },
-        "dev_token": { "type": "string", "x-sensitive": true, "x-env-var": "SCION_SERVER_AUTH_DEVTOKEN" },
+        "dev_token": {
+          "type": "string",
+          "description": "Dev auth token. Used by the server to accept dev requests and by the hub client to authenticate in dev mode. Also configurable via SCION_DEV_TOKEN env var or ~/.scion/dev-token file.",
+          "x-sensitive": true,
+          "x-env-var": "SCION_SERVER_AUTH_DEVTOKEN"
+        },
         "dev_token_file": { "type": "string", "x-env-var": "SCION_SERVER_AUTH_DEVTOKENFILE" },
         "authorized_domains": {
           "type": "array",
@@ -450,9 +437,10 @@
     },
     "serverStorage": {
       "type": "object",
+      "description": "Unified storage configuration. In the target state, a single bucket is used for all GCS storage (templates, workspaces, volumes) with path-based namespacing. See Phase 7 in the design doc.",
       "properties": {
         "provider": { "type": "string", "enum": ["local", "gcs"], "default": "local", "x-env-var": "SCION_SERVER_STORAGE_PROVIDER" },
-        "bucket": { "type": "string", "x-env-var": "SCION_SERVER_STORAGE_BUCKET" },
+        "bucket": { "type": "string", "description": "GCS bucket name. All storage types are namespaced under path prefixes within this bucket.", "x-env-var": "SCION_SERVER_STORAGE_BUCKET" },
         "local_path": { "type": "string", "x-env-var": "SCION_SERVER_STORAGE_LOCALPATH" }
       }
     },
