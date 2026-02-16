@@ -802,6 +802,10 @@ func TestDetectHierarchyFormat_Versioned(t *testing.T) {
 	defer os.Setenv("HOME", originalHome)
 	os.Setenv("HOME", tmpDir)
 
+	originalWd, _ := os.Getwd()
+	defer os.Chdir(originalWd)
+	os.Chdir(tmpDir)
+
 	globalScionDir := filepath.Join(tmpDir, ".scion")
 	require.NoError(t, os.MkdirAll(globalScionDir, 0755))
 
@@ -819,6 +823,10 @@ func TestDetectHierarchyFormat_Legacy(t *testing.T) {
 	originalHome := os.Getenv("HOME")
 	defer os.Setenv("HOME", originalHome)
 	os.Setenv("HOME", tmpDir)
+
+	originalWd, _ := os.Getwd()
+	defer os.Chdir(originalWd)
+	os.Chdir(tmpDir)
 
 	globalScionDir := filepath.Join(tmpDir, ".scion")
 	require.NoError(t, os.MkdirAll(globalScionDir, 0755))
@@ -840,6 +848,10 @@ func TestDetectHierarchyFormat_NoFiles(t *testing.T) {
 	defer os.Setenv("HOME", originalHome)
 	os.Setenv("HOME", tmpDir)
 
+	originalWd, _ := os.Getwd()
+	defer os.Chdir(originalWd)
+	os.Chdir(tmpDir)
+
 	assert.False(t, detectHierarchyFormat(""))
 }
 
@@ -849,6 +861,10 @@ func TestDetectHierarchyFormat_GroveVersioned(t *testing.T) {
 	originalHome := os.Getenv("HOME")
 	defer os.Setenv("HOME", originalHome)
 	os.Setenv("HOME", tmpDir)
+
+	originalWd, _ := os.Getwd()
+	defer os.Chdir(originalWd)
+	os.Chdir(tmpDir)
 
 	groveDir := filepath.Join(tmpDir, "my-grove", ".scion")
 	require.NoError(t, os.MkdirAll(groveDir, 0755))
