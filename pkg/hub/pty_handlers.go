@@ -137,10 +137,20 @@ func (s *Server) handleAgentPTY(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get terminal size from query params
+	cols := 80
+	rows := 24
+	if c := r.URL.Query().Get("cols"); c != "" {
+		fmt.Sscanf(c, "%d", &cols)
+	}
+	if rowStr := r.URL.Query().Get("rows"); rowStr != "" {
+		fmt.Sscanf(rowStr, "%d", &rows)
+	}
+
 	// Create PTY session
 	// Use agent.Slug for the stream since that's what the broker uses to look up containers
 	// (containers are labeled with scion.name=<slug>)
-	session := newPTYSession(ctx, agent.Slug, agent.RuntimeBrokerID, conn, s.controlChannel)
+	session := newPTYSession(ctx, agent.Slug, agent.RuntimeBrokerID, conn, s.controlChannel, cols, rows)
 	defer session.Close()
 
 	slog.Info("PTY session started", "agentID", agentID, "slug", agent.Slug, "user", identity.ID())
@@ -180,39 +190,39 @@ func (s *Server) validatePTYTicket(ctx context.Context, ticket string) Identity 
 
 // PTYSession manages a PTY WebSocket session.
 type PTYSession struct {
-	ctx           context.Context
-	cancel        context.CancelFunc
-	agentID       string
-	brokerID        string
-	conn          *websocket.Conn
-	controlChan   *ControlChannelManager
-	stream        *StreamProxy
-	writeMu       sync.Mutex
-	closed        bool
-	closeMu       sync.Mutex
+	ctx         context.Context
+	cancel      context.CancelFunc
+	agentID     string
+	brokerID    string
+	conn        *websocket.Conn
+	controlChan *ControlChannelManager
+	stream      *StreamProxy
+	cols        int
+	rows        int
+	writeMu     sync.Mutex
+	closed      bool
+	closeMu     sync.Mutex
 }
 
 // newPTYSession creates a new PTY session.
-func newPTYSession(ctx context.Context, agentID, brokerID string, conn *websocket.Conn, cc *ControlChannelManager) *PTYSession {
+func newPTYSession(ctx context.Context, agentID, brokerID string, conn *websocket.Conn, cc *ControlChannelManager, cols, rows int) *PTYSession {
 	ctx, cancel := context.WithCancel(ctx)
 	return &PTYSession{
 		ctx:         ctx,
 		cancel:      cancel,
 		agentID:     agentID,
-		brokerID:      brokerID,
+		brokerID:    brokerID,
 		conn:        conn,
 		controlChan: cc,
+		cols:        cols,
+		rows:        rows,
 	}
 }
 
 // Run starts the PTY session and blocks until it ends.
 func (s *PTYSession) Run() error {
-	// Get terminal size from query params or use defaults
-	cols := 80
-	rows := 24
-
 	// Open stream to broker
-	stream, err := s.controlChan.OpenStream(s.ctx, s.brokerID, wsprotocol.StreamTypePTY, s.agentID, cols, rows)
+	stream, err := s.controlChan.OpenStream(s.ctx, s.brokerID, wsprotocol.StreamTypePTY, s.agentID, s.cols, s.rows)
 	if err != nil {
 		return err
 	}

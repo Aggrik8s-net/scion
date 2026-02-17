@@ -115,7 +115,7 @@ function setupRouter(): void {
   // Find the content outlet within the app shell
   const appShell = document.querySelector('scion-app');
   if (!appShell) {
-    console.error('[Scion] App shell not found');
+    // Not using app shell on this page (e.g. terminal or login)
     return;
   }
 

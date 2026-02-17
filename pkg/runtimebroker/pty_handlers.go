@@ -352,8 +352,13 @@ func (h *StreamPTYHandler) Run() error {
 			h.ptyMaster.Close()
 		}
 		if h.cmd != nil && h.cmd.Process != nil {
-			h.cmd.Process.Kill()
-			h.cmd.Wait()
+			// Kill only if still running
+			if h.cmd.ProcessState == nil {
+				h.cmd.Process.Kill()
+			}
+			if err := h.cmd.Wait(); err != nil {
+				slog.Debug("PTY command exited with error", "slug", h.slug, "error", err)
+			}
 		}
 	}()
 
