@@ -46,6 +46,7 @@ export default defineConfig({
 							items: [
 								{ label: 'Installation', slug: 'install' },
 								{ label: 'Workspace Management', slug: 'guides/workspace' },
+								{ label: 'Local Configuration', slug: 'guides/local-governance' },
 							],
 						},
 						{
@@ -68,7 +69,6 @@ export default defineConfig({
 				{
 					label: 'Operations & Hosting',
 					items: [
-						{ label: 'Local Governance', slug: 'guides/local-governance' },
 						{ label: 'Hub Setup', slug: 'guides/hub-server' },
 						{ label: 'Runtime Broker', slug: 'guides/runtime-broker' },
 						{ label: 'Kubernetes', slug: 'guides/kubernetes' },

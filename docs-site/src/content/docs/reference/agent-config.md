@@ -1,15 +1,18 @@
 ---
-title: Agent & Template Configuration (scion-agent.json)
+title: Agent Configuration (scion-agent.yaml)
+description: Reference for Scion agent templates and configuration.
 ---
 
-This document describes the configuration for Scion agent blueprints (templates) and individual agent instances.
+The `scion-agent.yaml` file acts as the blueprint for an agent. It defines the environment, resources, and harness configuration required to run the agent.
 
-## Purpose
-The `scion-agent.json` file specifies how a particular agent should be executed. It defines the harness to use, the container image, environment variables, volume mounts, and runtime-specific settings.
+## File Locations
 
-## Locations
-- **Templates**: `.scion/templates/<template-name>/scion-agent.json`
-- **Agent Instances**: `.scion/agents/<agent-name>/scion-agent.json`
+- **Templates**: `.scion/templates/<template-name>/scion-agent.yaml`
+- **Active Agents**: `.scion/agents/<agent-name>/scion-agent.yaml`
+
+:::note[Format Change]
+Previous versions of Scion used `scion-agent.json`. The new versioned settings system uses `scion-agent.yaml`, though JSON is still supported as valid YAML.
+:::
 
 ## Configuration Fields
 
@@ -17,39 +20,64 @@ The `scion-agent.json` file specifies how a particular agent should be executed.
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `harness` | string | The name of the harness to use (e.g., `gemini`, `claude`, `opencode`). |
-| `image` | string | The container image to run (overrides the harness default). |
-| `env` | map | A map of environment variables to inject into the agent container. |
-| `volumes` | list | List of volume mounts (see below). |
-| `command_args` | list | Additional arguments to pass to the agent process. |
-| `detached` | bool | Whether to run the agent in the background (default `true`). |
-| `model` | string | The LLM model name to use (harness-dependent). |
+| `schema_version` | string | Should be `"1"`. |
+| `harness_config` | string | The name of the harness config to use (e.g., `gemini`, `gemini-secure`). References `harness_configs` in `settings.yaml`. |
+| `image` | string | Override the container image defined in the harness config. |
+| `env` | map | Environment variables to inject into the container. |
+| `volumes` | list | Additional volume mounts. |
+| `detached` | bool | Run in background (default `true`). |
+| `command_args` | list | Additional arguments passed to the harness entrypoint. |
 
-### Volume Mounts (`volumes`)
-Each entry in the `volumes` list has the following fields:
-
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `source` | string | Source path on the host or workspace. Supports env var expansion. |
-| `target` | string | Destination path inside the container. |
-| `read_only` | bool | Whether the mount is read-only. |
-| `type` | string | Mount type: `local` (default) or `gcs`. |
-| `bucket` | string | The GCS bucket name (for `type: gcs`). |
-| `prefix` | string | The path prefix within the bucket (for `type: gcs`). |
-
-### Kubernetes Settings (`kubernetes`)
-Configuration used when running on a Kubernetes runtime.
+### Limits & Resources
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `namespace` | string | Target Kubernetes namespace. |
-| `runtimeClassName` | string | The name of the RuntimeClass to use. |
-| `serviceAccountName` | string | The service account for the pod (useful for Workload Identity). |
-| `resources` | object | Resource `requests` and `limits` (e.g., `cpu`, `memory`). |
+| `max_turns` | int | Maximum number of LLM turns before the agent stops. |
+| `max_duration` | string | Maximum runtime duration (e.g., `"2h"`, `"30m"`). |
+| `resources` | object | Container resource requests/limits (see below). |
 
-## Resolution & Inheritance
-When an agent is created from a template:
-1.  The template's `scion-agent.json` is loaded as the base.
-2.  Any overrides provided via the `scion start` command (e.g., `--image`, `--env`) are merged.
-3.  The final resolved configuration is saved to the agent's directory.
-4.  Runtime-specific defaults (from `settings.yaml`) may still apply if not overridden here.
+### Resource Specification
+
+```yaml
+resources:
+  requests:
+    cpu: "500m"
+    memory: "512Mi"
+  limits:
+    cpu: "2"
+    memory: "2Gi"
+  disk: "10Gi"
+```
+
+### Sidecar Services (`services`)
+
+Define auxiliary containers to run alongside the agent (e.g., a headless browser).
+
+```yaml
+services:
+  - name: browser
+    command: ["chromium", "--headless"]
+    ready_check:
+      type: tcp
+      target: "localhost:9222"
+```
+
+### Kubernetes Specifics (`kubernetes`)
+
+Overrides for Kubernetes runtimes.
+
+```yaml
+kubernetes:
+  namespace: "custom-ns"
+  service_account_name: "workload-identity-sa"
+  runtime_class_name: "gvisor"
+```
+
+## Resolution Logic
+
+When an agent starts:
+
+1.  **Template Load**: Scion loads `scion-agent.yaml` from the selected template.
+2.  **Harness Resolution**: It resolves the `harness_config` against the active profile's `harness_configs` map in `settings.yaml`.
+3.  **Overrides**: CLI flags (e.g., `--image`, `--env`) override values in `scion-agent.yaml`.
+4.  **Final Config**: The resolved configuration is written to the agent's runtime directory.

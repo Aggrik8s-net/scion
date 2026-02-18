@@ -79,16 +79,16 @@ scion broker status
 
 ## Configuration
 
-The Runtime Broker can be configured via environment variables or a `settings.yaml` file.
+The Runtime Broker is configured in `settings.yaml` under the `server` section, or via environment variables.
 
 ### Key Settings
 
 | Setting | Env Var | Description |
 |---------|---------|-------------|
-| `broker.port` | `SCION_BROKER_PORT` | Port for the Broker API (default: 9800). |
-| `hub.endpoint` | `SCION_HUB_ENDPOINT` | URL of the Scion Hub. |
-| `broker.id` | `SCION_BROKER_ID` | Unique ID for the broker (assigned during registration). |
-| `broker.autoProvide` | `SCION_BROKER_AUTOPROVIDE` | Automatically add as provider for new groves. |
+| `server.broker.port` | `SCION_SERVER_BROKER_PORT` | Port for the Broker API (default: 9800). |
+| `server.broker.hub_endpoint` | `SCION_SERVER_BROKER_HUB_ENDPOINT` | URL of the Scion Hub. |
+| `server.broker.broker_id` | `SCION_SERVER_BROKER_BROKER_ID` | Unique ID for the broker (assigned during registration). |
+| `server.broker.auto_provide` | `SCION_SERVER_BROKER_AUTOPROVIDE` | Automatically add as provider for new groves. |
 
 ### Resource Limits
 
@@ -96,11 +96,12 @@ When running in multi-tenant environments, you can configure the broker to limit
 
 ```yaml
 # settings.yaml
-broker:
-  resources:
-    maxConcurrentAgents: 10
-    defaultCpuRequest: "500m"
-    defaultMemoryRequest: "1Gi"
+server:
+  broker:
+    resources:
+      max_concurrent_agents: 10
+      default_cpu_request: "500m"
+      default_memory_request: "1Gi"
 ```
 
 ## Security

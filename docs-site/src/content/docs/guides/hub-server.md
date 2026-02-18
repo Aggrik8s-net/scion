@@ -31,19 +31,21 @@ While they can run in the same process (the default for `scion server`), they se
 
 ## Configuration
 
-The Hub looks for a configuration file at `~/.scion/server.yaml`.
+The Hub is configured via the `server` section in `~/.scion/settings.yaml`.
 
 ### Basic Example
 ```yaml
-hub:
-  port: 9810
-  host: 0.0.0.0
-database:
-  driver: sqlite
-  url: hub.db
-auth:
-  devMode: true
-logLevel: info
+schema_version: "1"
+server:
+  log_level: info
+  hub:
+    port: 9810
+    host: 0.0.0.0
+  database:
+    driver: sqlite
+    url: hub.db
+  auth:
+    dev_mode: true
 ```
 
 See the [Server Configuration Reference](/reference/server-config) for all available fields.
@@ -59,8 +61,9 @@ See the [Authentication Guide](/guides/auth) for detailed setup instructions.
 ### Dev Auth (Local Development)
 For local testing, the Hub can auto-generate a development token:
 ```yaml
-auth:
-  devMode: true
+server:
+  auth:
+    dev_mode: true
 ```
 The token is written to `~/.scion/dev-token` on startup. The CLI and Web Dashboard automatically detect this token when running on the same machine.
 
@@ -74,17 +77,19 @@ The Hub requires a database to store its state.
 ### SQLite (Default)
 Ideal for local development or single-node deployments. The database is a single file.
 ```yaml
-database:
-  driver: sqlite
-  url: /path/to/your/hub.db
+server:
+  database:
+    driver: sqlite
+    url: /path/to/your/hub.db
 ```
 
 ### PostgreSQL (Production)
 Recommended for high-availability or multi-node deployments.
 ```yaml
-database:
-  driver: postgres
-  url: "postgres://user:password@localhost:5432/scion?sslmode=disable"
+server:
+  database:
+    driver: postgres
+    url: "postgres://user:password@localhost:5432/scion?sslmode=disable"
 ```
 
 ## Storage Backends
@@ -92,7 +97,7 @@ database:
 The Hub stores agent templates and other artifacts.
 
 - **Local File System**: Default. Stores files in `~/.scion/storage`.
-- **Google Cloud Storage (GCS)**: Recommended for cloud deployments. Set the `SCION_STORAGE_BUCKET` environment variable.
+- **Google Cloud Storage (GCS)**: Recommended for cloud deployments. Set the `SCION_SERVER_STORAGE_BUCKET` environment variable.
 
 ## Deployment
 
@@ -125,4 +130,3 @@ The Hub exposes health check endpoints:
 - `/readyz`: Readiness check (verifies database connectivity).
 
 Logs are output to `stdout` in either `text` (default) or `json` format, suitable for collection by systems like Fluentd, Cloud Logging, or Prometheus.
-

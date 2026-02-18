@@ -1,11 +1,17 @@
 ---
 title: Orchestrator Settings (settings.yaml)
+description: Configuration reference for the Scion CLI and orchestrator.
 ---
 
-This document describes the configuration for the Scion orchestrator, managed through `settings.yaml` (or `settings.json`) files.
+This document describes the configuration for the Scion orchestrator, managed through `settings.yaml` files. These settings control the behavior of the CLI, local agent execution, and connections to the Scion Hub.
 
-## Purpose
-The orchestrator settings define the available infrastructure components (Runtimes), the tools that can be run (Harness Configs), and how they are combined into environments (Profiles). It also contains client-side configuration for connecting to a Scion Hub.
+## File Locations
+
+Scion loads settings from the following locations, merging them in order (later sources override earlier ones):
+
+1.  **Global Settings**: `~/.scion/settings.yaml` (User-wide defaults)
+2.  **Grove Settings**: `.scion/settings.yaml` (Project-specific overrides)
+3.  **Environment Variables**: `SCION_*` overrides.
 
 ## Versioned Format
 
@@ -17,93 +23,117 @@ active_profile: local
 default_template: gemini
 ```
 
-Files without `schema_version` are treated as legacy format. Run `scion config migrate` to convert legacy files to the versioned format.
-
-## Locations
-- **Global**: `~/.scion/settings.yaml` (User-wide defaults)
-- **Grove**: `.scion/settings.yaml` (Project-specific overrides)
-
-Settings are resolved in order: Defaults → Global → Grove → Environment Variables. Later sources override earlier ones.
+:::note[Legacy Format]
+Files without `schema_version` are treated as legacy format. Run `scion config migrate` to automatically convert legacy files to the versioned format.
+:::
 
 ## Top-Level Fields
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `schema_version` | string | Schema version identifier. Currently `"1"`. |
-| `active_profile` | string | The active profile name (e.g., `local`, `remote`). |
-| `default_template` | string | Default agent template (e.g., `gemini`, `claude`). |
+| `schema_version` | string | **Required**. Must be `"1"`. |
+| `active_profile` | string | The name of the profile to use by default (e.g., `local`, `remote`). |
+| `default_template` | string | The default template to use when creating agents (e.g., `gemini`, `claude`). |
 
-## Hub Client Configuration (`hub`)
-Settings for connecting the CLI to a Scion Hub.
+## CLI Configuration (`cli`)
 
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `enabled` | bool | Whether to enable Hub integration for this grove. |
-| `endpoint` | string | The Hub API endpoint URL (e.g., `https://hub.scion.dev`). |
-| `grove_id` | string | The unique identifier for this grove on the Hub. |
-| `local_only` | bool | If true, operate in local-only mode even if Hub is configured. |
-
-> **Note**: The legacy fields `token`, `apiKey`, `hostId`, `hostNickname`, `brokerId`, `brokerNickname`, and `brokerToken` have been removed from the versioned format. Broker identity fields are now under `server.broker`. Runtime state such as `lastSyncedAt` is stored in `state.yaml`.
-
-## Harness Configs (`harness_configs`)
-Named configurations for agent harnesses. Each entry defines a harness type and its container settings.
+General behavior settings for the command-line interface.
 
 ```yaml
-harness_configs:
-  gemini:
-    harness: gemini
-    image: example.com/scion-gemini:latest
-    user: scion
-    model: gemini-2.5-pro
-    args: ["--sandbox=strict"]
-    env:
-      MY_VAR: value
-    volumes:
-      - source: /host/path
-        target: /container/path
+cli:
+  autohelp: true
+  interactive_disabled: false
 ```
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `harness` | string | **(Required)** The harness type this config applies to (e.g., `gemini`, `claude`). |
-| `image` | string | Container image to use. |
-| `user` | string | User to run as inside the container. |
-| `model` | string | Default model for this harness. |
-| `args` | list | Additional arguments passed to the harness. |
-| `env` | map | Environment variables for the container. |
-| `volumes` | list | Volume mounts for the container. |
-| `auth_selected_type` | string | Authentication type selection. |
+| `autohelp` | bool | Whether to print usage help on every error. Default: `true`. |
+| `interactive_disabled` | bool | If `true`, disables all interactive prompts (useful for scripts). |
 
-> **Note**: The legacy `harnesses` key (without the `harness` field) is deprecated. Use `harness_configs` with the required `harness` field instead.
+## Hub Client Configuration (`hub`)
+
+Settings for connecting the CLI to a Scion Hub.
+
+```yaml
+hub:
+  enabled: true
+  endpoint: "https://hub.example.com"
+  grove_id: "uuid-or-slug"
+  local_only: false
+```
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `enabled` | bool | Whether to enable Hub integration for this grove. |
+| `endpoint` | string | The Hub API endpoint URL. |
+| `grove_id` | string | The unique identifier for this grove on the Hub. |
+| `local_only` | bool | If `true`, forces local-only operation even if the Hub is configured. |
+
+:::caution[Moved Fields]
+Legacy fields like `token`, `apiKey`, and broker identity fields (`brokerId`) have been removed. 
+- **Dev Auth** is now handled via `server.auth.dev_token` (or `SCION_DEV_TOKEN`).
+- **Broker Identity** is now configured in the `server.broker` section (see [Server Configuration](/reference/server-config/)).
+:::
 
 ## Runtimes (`runtimes`)
-Configuration for execution backends.
+
+Defines the execution backends available to Scion.
 
 ```yaml
 runtimes:
   docker:
     type: docker
-    host: tcp://localhost:2375
-  container:
-    type: container
-  my-k8s:
+    host: "unix:///var/run/docker.sock"
+  
+  remote-k8s:
     type: kubernetes
-    namespace: scion
-    context: prod-cluster
+    context: "my-cluster"
+    namespace: "scion-agents"
 ```
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `type` | string | The runtime type (`docker`, `container`, `kubernetes`). Defaults to the map key name. |
-| `host` | string | Runtime host address. |
-| `context` | string | Kubernetes context name. |
-| `namespace` | string | Kubernetes namespace. |
-| `tmux` | bool | Whether to use tmux for terminal management. |
-| `env` | map | Environment variables for the runtime. |
-| `sync` | string | File sync strategy. |
+| `type` | string | The runtime type: `docker`, `container` (Apple), or `kubernetes`. |
+| `host` | string | (Docker) The Docker daemon socket or TCP address. |
+| `context` | string | (Kubernetes) The kubectl context name. |
+| `namespace` | string | (Kubernetes) The target namespace. |
+| `tmux` | bool | Whether to wrap agent processes in a tmux session. |
+| `sync` | string | File sync strategy (e.g., `tar`, `mutagen`). |
+| `env` | map | Environment variables to set for the runtime. |
+
+## Harness Configs (`harness_configs`)
+
+Named configurations for agent harnesses. This replaces the legacy `harnesses` map.
+
+```yaml
+harness_configs:
+  gemini:
+    harness: gemini
+    image: "us-central1-docker.pkg.dev/.../scion-gemini:latest"
+    user: scion
+    model: "gemini-1.5-pro"
+  
+  claude-beta:
+    harness: claude
+    image: "custom-claude:beta"
+    env:
+      ANTHROPIC_BETA: "true"
+```
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `harness` | string | **Required**. The harness type (e.g., `gemini`, `claude`, `opencode`). |
+| `image` | string | Container image to use. |
+| `user` | string | Unix username inside the container. |
+| `model` | string | Default model identifier. |
+| `args` | list | Additional CLI arguments for the harness. |
+| `env` | map | Environment variables injected into the container. |
+| `volumes` | list | Volume mounts. |
+| `auth_selected_type` | string | Authentication method selection (harness-specific). |
 
 ## Profiles (`profiles`)
-Named configurations that bind a runtime to harness settings and overrides.
+
+Profiles bind a Runtime to a set of Harness Configs and overrides. They allow you to switch between environments (e.g., "Local Docker" vs "Remote Kubernetes") easily.
 
 ```yaml
 profiles:
@@ -112,61 +142,36 @@ profiles:
     default_template: gemini
     default_harness_config: gemini
     tmux: true
-    env:
-      ENVIRONMENT: development
     harness_overrides:
       gemini:
-        image: example.com/gemini:dev
+        image: "gemini:dev"
 ```
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `runtime` | string | **(Required)** Name of the runtime to use (must exist in `runtimes`). |
+| `runtime` | string | **Required**. Name of a runtime defined in `runtimes`. |
 | `default_template` | string | Default template for agents created under this profile. |
-| `default_harness_config` | string | Default harness config for agents under this profile. |
-| `tmux` | bool | Whether to use tmux for terminal management. |
-| `env` | map | Environment variables merged into harness and runtime configs. |
-| `volumes` | list | Additional volume mounts appended to harness volumes. |
-| `resources` | object | Resource requests/limits for the runtime (CPU, memory, disk). |
-| `harness_overrides` | map | Per-harness overrides (image, user, env, volumes, auth_selected_type). |
+| `default_harness_config` | string | Default harness config to use. |
+| `tmux` | bool | Override the runtime's tmux setting. |
+| `env` | map | Environment variables merged into the runtime environment. |
+| `harness_overrides` | map | Per-harness-config overrides. Keys match `harness_configs` names. |
 
-## CLI Configuration (`cli`)
-General CLI behavior settings.
+## Server Configuration (`server`)
 
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `autohelp` | bool | Whether to print usage help on every error. |
-| `interactive_disabled` | bool | Disable interactive prompts. |
+When running the `scion server` (Hub or Broker), configuration is read from the `server` section of `settings.yaml`. 
+
+See the [Server Configuration Reference](/reference/server-config/) for details.
 
 ## Environment Variable Overrides
-Most settings can be overridden using environment variables with the `SCION_` prefix.
 
-| Environment Variable | Maps To |
+Settings can be overridden using environment variables with the `SCION_` prefix.
+
+| Setting | Environment Variable |
 | :--- | :--- |
-| `SCION_ACTIVE_PROFILE` | `active_profile` |
-| `SCION_DEFAULT_TEMPLATE` | `default_template` |
-| `SCION_HUB_ENDPOINT` | `hub.endpoint` |
-| `SCION_HUB_GROVE_ID` | `hub.grove_id` |
-| `SCION_HUB_ENABLED` | `hub.enabled` |
-| `SCION_HUB_LOCAL_ONLY` | `hub.local_only` |
-| `SCION_CLI_AUTOHELP` | `cli.autohelp` |
-| `SCION_CLI_INTERACTIVE_DISABLED` | `cli.interactive_disabled` |
+| `active_profile` | `SCION_ACTIVE_PROFILE` |
+| `default_template` | `SCION_DEFAULT_TEMPLATE` |
+| `hub.endpoint` | `SCION_HUB_ENDPOINT` |
+| `hub.grove_id` | `SCION_HUB_GROVE_ID` |
+| `cli.autohelp` | `SCION_CLI_AUTOHELP` |
 
-## Migration
-
-To migrate legacy settings files to the versioned format:
-
-```bash
-# Preview what would change
-scion config migrate --dry-run
-
-# Migrate all settings files
-scion config migrate
-
-# Migrate only global settings
-scion config migrate --global
-```
-
-The migration creates a backup of original files (`.bak`) and converts `harnesses` to `harness_configs`, removes deprecated Hub fields, and migrates `hub.lastSyncedAt` to `state.yaml`.
-
-For a detailed walkthrough of orchestrator settings and environment variable substitution, see the [Local Governance Guide](/guides/local-governance/).
+See [Local Governance](/guides/local-governance/) for more on variable substitution.

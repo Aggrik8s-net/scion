@@ -1,63 +1,42 @@
 ---
 title: Configuration Overview
+description: Guide to the Scion configuration file ecosystem.
 ---
 
-Scion uses a multi-layered configuration system to manage orchestrator behavior, agent execution, and server operations. Settings files use a versioned format identified by the `schema_version` field. The current version is `1`.
+Scion uses a multi-layered configuration system to manage orchestrator behavior, agent execution, and server operations.
 
-## Configuration Domains
+## Key Configuration Files
 
-The documentation is divided into the following domains:
+| File | Purpose | Scope | Reference |
+| :--- | :--- | :--- | :--- |
+| `settings.yaml` | **Orchestrator Settings**. Defines profiles, runtimes, and harness configurations. | Global (`~`) or Project (`.scion`) | [Orchestrator Settings](/reference/orchestrator-settings/) |
+| `scion-agent.yaml` | **Agent Blueprint**. Defines the configuration for a specific agent or template. | Template or Agent | [Agent Configuration](/reference/agent-config/) |
+| `state.yaml` | **Runtime State**. Tracks system state like sync timestamps. | Project (`.scion`) | N/A (Managed by Scion) |
 
-### [Orchestrator Settings (settings.yaml)](/reference/orchestrator-settings/)
-Global and project-level settings for the `scion` CLI and orchestrator. Defines Runtimes, Harness Configs, and execution Profiles. Uses the versioned format with `schema_version`.
+## Server Configuration
 
-### [Agent & Template Configuration (scion-agent.json)](/reference/agent-config/)
-Configuration for agent blueprints (templates) and individual agent instances. Defines container images, volumes, and environment variables.
+Server configuration (for Hub and Runtime Broker) is now integrated into `settings.yaml` under the `server` key.
 
-### [Server Configuration (Hub & Runtime Broker)](/reference/server-config/)
-Operational settings for the Scion Hub and Runtime Broker services. Server configuration is now part of `settings.yaml` under the `server` key. The standalone `server.yaml` is deprecated but still supported as a fallback.
+- [Server Configuration Reference](/reference/server-config/)
 
-### [Web Dashboard Configuration](/reference/web-config/)
-Environment variables and settings for the Web Dashboard frontend and BFF.
+## Configuration Hierarchy
 
-### [Harness-Specific Settings](/reference/harness-settings/)
-Guide to configuring the LLM tools and harnesses running *inside* the agent containers.
+Scion resolves settings in the following order (highest priority first):
 
----
-
-## Key Files
-
-| File | Purpose |
-| :--- | :--- |
-| `settings.yaml` | Primary configuration file (global and grove-level). Contains orchestrator settings and optionally server configuration under the `server` key. |
-| `state.yaml` | Runtime-managed state (e.g., `last_synced_at`). Not user-edited. |
-| `scion-agent.json` | Agent and template configuration. |
-
-> **Note**: The standalone `server.yaml` is deprecated. Use `scion config migrate --server` to consolidate it into `settings.yaml`.
-
-## Resolution Hierarchy
-
-Scion typically resolves configuration using the following precedence (from highest to lowest):
-
-1. **CLI Flags**: `--hub`, `--profile`, etc.
-2. **Environment Variables**: `SCION_*` and `SCION_SERVER_*`.
-3. **Grove Settings**: `.scion/settings.yaml` in the current project.
-4. **Global Settings**: `~/.scion/settings.yaml` in the user's home directory.
-5. **Defaults**: Hardcoded system defaults.
+1.  **CLI Flags**: (e.g., `scion start --profile remote`)
+2.  **Environment Variables**: `SCION_*` overrides.
+3.  **Grove Settings**: `.scion/settings.yaml` (Project level).
+4.  **Global Settings**: `~/.scion/settings.yaml` (User level).
+5.  **Defaults**: System built-ins.
 
 ## Migration
 
-Legacy settings files (without `schema_version`) can be migrated to the versioned format using the `scion config migrate` command:
+To migrate legacy configuration files to the new schema v1 format:
 
 ```bash
-# Preview changes
-scion config migrate --dry-run
-
-# Migrate all legacy settings files
+# Migrate general settings
 scion config migrate
 
-# Migrate server.yaml into settings.yaml
+# Migrate server.yaml to settings.yaml
 scion config migrate --server
 ```
-
-See the [Orchestrator Settings](/reference/orchestrator-settings/) and [Server Configuration](/reference/server-config/) pages for details.
