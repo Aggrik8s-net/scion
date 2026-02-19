@@ -16,18 +16,89 @@ Scion provides built-in telemetry collection via `sciontool`, which runs as the 
 
 ## Configuration
 
-Telemetry is configured via environment variables. For hosted deployments, these are typically managed via the Scion Hub.
+Telemetry is configured through `settings.yaml` (for global and grove-level defaults) and `scion-agent.yaml` (for per-template and per-agent overrides). Environment variables provide the highest-priority override.
 
-### Global Telemetry Settings
+### Configuration Hierarchy
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SCION_TELEMETRY_ENABLED` | `true` | Enable/disable collection entirely |
-| `SCION_TELEMETRY_CLOUD_ENABLED` | `true` | Enable forwarding to cloud backend |
-| `SCION_OTEL_ENDPOINT` | (required) | Cloud OTLP endpoint URL |
-| `SCION_OTEL_PROTOCOL` | `grpc` | Protocol: `grpc` or `http` |
-| `SCION_OTEL_INSECURE` | `false` | Skip TLS verification (development only) |
-| `SCION_GCP_PROJECT_ID` | (auto) | GCP project ID for Google Cloud backends |
+Telemetry settings resolve across scopes using **last-write-wins** semantics:
+
+1.  **Global settings** (`~/.scion/settings.yaml`) — Organization-wide defaults.
+2.  **Grove settings** (`.scion/settings.yaml`) — Project-level overrides.
+3.  **Template config** (`scion-agent.yaml` in template) — Role-specific overrides.
+4.  **Agent config** (`scion-agent.yaml` in agent home) — Per-agent overrides.
+5.  **Environment variables** (`SCION_TELEMETRY_*`, `SCION_OTEL_*`) — Highest priority.
+
+At each scope, only the fields you specify are overridden; unset fields inherit from the previous scope.
+
+### Settings File Configuration
+
+The `telemetry` block can appear in any `settings.yaml` (global or grove) or `scion-agent.yaml` (template or agent):
+
+```yaml
+# In settings.yaml or scion-agent.yaml
+telemetry:
+  enabled: true
+
+  cloud:
+    enabled: true
+    endpoint: "monitoring.googleapis.com:443"
+    protocol: grpc
+    headers:
+      Authorization: "Bearer ${OTEL_API_KEY}"
+    tls:
+      enabled: true
+      insecure_skip_verify: false
+    batch:
+      max_size: 512
+      timeout: "5s"
+
+  hub:
+    enabled: true
+    report_interval: "30s"
+
+  local:
+    enabled: false
+    file: ""
+    console: false
+
+  filter:
+    enabled: true
+    respect_debug_mode: true
+    events:
+      include: []
+      exclude:
+        - "agent.user.prompt"
+    attributes:
+      redact:
+        - "prompt"
+        - "user.email"
+        - "tool_output"
+      hash:
+        - "session_id"
+    sampling:
+      default: 1.0
+      rates: {}
+
+  resource:
+    service.name: "scion-agent"
+```
+
+See the [Orchestrator Settings Reference](/reference/orchestrator-settings/#telemetry-configuration-telemetry) for the full field reference.
+
+### Environment Variable Overrides
+
+Environment variables override any settings file value and are the most convenient option for CI or hosted deployments.
+
+| Variable | Settings Path | Default | Description |
+|----------|--------------|---------|-------------|
+| `SCION_TELEMETRY_ENABLED` | `telemetry.enabled` | `true` | Enable/disable collection entirely |
+| `SCION_TELEMETRY_CLOUD_ENABLED` | `telemetry.cloud.enabled` | `true` | Enable forwarding to cloud backend |
+| `SCION_OTEL_ENDPOINT` | `telemetry.cloud.endpoint` | (required) | Cloud OTLP endpoint URL |
+| `SCION_OTEL_PROTOCOL` | `telemetry.cloud.protocol` | `grpc` | Protocol: `grpc` or `http` |
+| `SCION_OTEL_INSECURE` | `telemetry.cloud.tls.insecure_skip_verify` | `false` | Skip TLS verification (dev only) |
+| `SCION_TELEMETRY_HUB_ENABLED` | `telemetry.hub.enabled` | `true` | Enable Hub reporting |
+| `SCION_TELEMETRY_DEBUG` | `telemetry.local.enabled` | `false` | Enable local debug output |
+| `SCION_GCP_PROJECT_ID` | — | (auto) | GCP project ID for Google Cloud backends |
 
 ### Local Receiver Settings (For Agents)
 
@@ -96,19 +167,37 @@ For every significant lifecycle event (session start/end, tool use, model call),
 
 ## Privacy Filtering
 
-By default, sciontool excludes `agent.user.prompt` events to protect user privacy. You can customize filtering:
+By default, sciontool excludes `agent.user.prompt` events to protect user privacy. Filtering is configured via the `telemetry.filter` block in `settings.yaml` or `scion-agent.yaml`, or via environment variables.
 
-### Exclude Specific Event Types
+### Via Settings File
+
+```yaml
+telemetry:
+  filter:
+    events:
+      exclude:
+        - "agent.user.prompt"
+        - "agent.tool.result"
+    attributes:
+      redact:
+        - "prompt"
+        - "user.email"
+        - "tool_output"
+      hash:
+        - "session_id"
+    sampling:
+      default: 1.0
+      rates:
+        "agent.tool.call": 0.5
+```
+
+### Via Environment Variables
 
 ```bash
 # Exclude multiple event types
 export SCION_TELEMETRY_FILTER_EXCLUDE="agent.user.prompt,agent.tool.result"
-```
 
-### Include Only Specific Event Types
-
-```bash
-# Only forward these specific event types
+# Only forward specific event types
 export SCION_TELEMETRY_FILTER_INCLUDE="agent.session.start,agent.session.end,agent.tool.call"
 ```
 

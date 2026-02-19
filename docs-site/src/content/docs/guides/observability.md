@@ -87,19 +87,44 @@ Both approaches can be used simultaneously — OTel for the full telemetry pipel
 
 Agents use `sciontool` as their init process, which includes an embedded OTLP forwarder. This forwarder must be configured to point to your cloud backend.
 
-As an administrator, the most effective way to configure this is via **Hub Environment Variables**. When configured at the Grove or Broker level on the Hub, these variables are automatically injected into every agent container.
+#### Via Settings File (Recommended)
 
-1.  **Set Grove/Broker Variables on the Hub**:
-    ```bash
-    SCION_OTEL_ENDPOINT="monitoring.googleapis.com:443"
-    SCION_GCP_PROJECT_ID="your-project-id"
-    SCION_TELEMETRY_ENABLED="true"
-    ```
+The preferred approach is to configure telemetry in `settings.yaml`. Settings at the global level apply to all agents; grove-level settings apply to a specific project. Templates and individual agents can further override these via their `scion-agent.yaml`.
 
-2.  **Harness-Specific Configuration**: If you are using agents that natively support OpenTelemetry (like `opencode`), you may need to explicitly tell the agent where to find the `sciontool` forwarder (which is `localhost` from the agent's perspective):
+```yaml
+# In ~/.scion/settings.yaml (global) or .scion/settings.yaml (grove)
+telemetry:
+  enabled: true
+  cloud:
+    enabled: true
+    endpoint: "monitoring.googleapis.com:443"
+    protocol: grpc
+  filter:
+    events:
+      exclude:
+        - "agent.user.prompt"
+```
 
-    - **gRPC (Default)**: `OTEL_EXPORTER_OTLP_ENDPOINT="localhost:4317"`
-    - **HTTP**: `OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318"`
+See the [Orchestrator Settings Reference](/reference/orchestrator-settings/#telemetry-configuration-telemetry) for the full field reference, and [Metrics & OpenTelemetry](/guides/metrics/#configuration-hierarchy) for how settings merge across scopes.
+
+#### Via Hub Environment Variables
+
+For hosted deployments, environment variables can be set at the Grove or Broker level on the Hub. These are automatically injected into every agent container.
+
+```bash
+SCION_OTEL_ENDPOINT="monitoring.googleapis.com:443"
+SCION_GCP_PROJECT_ID="your-project-id"
+SCION_TELEMETRY_ENABLED="true"
+```
+
+#### Harness-Specific Configuration
+
+If you are using agents that natively support OpenTelemetry (like `opencode`), you may need to explicitly tell the agent where to find the `sciontool` forwarder (which is `localhost` from the agent's perspective):
+
+- **gRPC (Default)**: `OTEL_EXPORTER_OTLP_ENDPOINT="localhost:4317"`
+- **HTTP**: `OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318"`
+
+These harness-specific env vars are injected at agent start time via the harness config's `env` map and are separate from the Scion telemetry settings.
 
 ## Agent Logs
 

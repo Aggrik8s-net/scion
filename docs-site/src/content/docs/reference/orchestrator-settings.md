@@ -161,9 +161,92 @@ profiles:
 | `env` | map | Environment variables merged into the runtime environment. |
 | `harness_overrides` | map | Per-harness-config overrides. Keys match `harness_configs` names. |
 
+## Telemetry Configuration (`telemetry`)
+
+Controls agent telemetry collection, forwarding, privacy filtering, and debug output. Telemetry settings can be defined at global or grove scope and are merged across the hierarchy (last write wins). They can also be overridden per-template or per-agent in `scion-agent.yaml`.
+
+See the [Metrics & OpenTelemetry guide](/guides/metrics/) for operational details.
+
+### Basic Example
+
+```yaml
+telemetry:
+  enabled: true
+  cloud:
+    enabled: true
+    endpoint: "monitoring.googleapis.com:443"
+    protocol: grpc
+  filter:
+    events:
+      exclude:
+        - "agent.user.prompt"
+```
+
+### Cloud Forwarding (`telemetry.cloud`)
+
+Settings for forwarding telemetry to a cloud OTLP backend.
+
+| Field | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `enabled` | bool | `true` | Enable cloud forwarding. |
+| `endpoint` | string | — | Cloud OTLP endpoint URL. |
+| `protocol` | string | `grpc` | Transport protocol: `grpc` or `http`. |
+| `headers` | map | — | Additional headers for OTLP export (e.g., `Authorization`). |
+| `tls.enabled` | bool | `true` | Enable TLS for the connection. |
+| `tls.insecure_skip_verify` | bool | `false` | Skip TLS certificate verification (development only). |
+| `batch.max_size` | int | `512` | Maximum spans per batch export. |
+| `batch.timeout` | string | `5s` | Maximum wait time before flushing a partial batch. |
+
+### Hub Reporting (`telemetry.hub`)
+
+Settings for reporting telemetry summaries to the Scion Hub.
+
+| Field | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `enabled` | bool | `true` | Enable Hub telemetry reporting. Auto-enabled in hosted mode. |
+| `report_interval` | string | `30s` | Interval between Hub reports. |
+
+### Local Debug Output (`telemetry.local`)
+
+Settings for local debug telemetry output.
+
+| Field | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `enabled` | bool | `false` | Enable local debug output. |
+| `file` | string | — | Path for JSONL telemetry file output. |
+| `console` | bool | `false` | Write debug telemetry to stderr. |
+
+### Filtering (`telemetry.filter`)
+
+Controls event filtering, attribute redaction, and sampling.
+
+| Field | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `enabled` | bool | `true` | Enable event filtering. |
+| `respect_debug_mode` | bool | `true` | Bypass filters when debug mode is active. |
+| `events.include` | list | `[]` | Event types to include (empty = all). |
+| `events.exclude` | list | `["agent.user.prompt"]` | Event types to exclude. |
+| `attributes.redact` | list | See below | Attribute names to replace with `[REDACTED]`. |
+| `attributes.hash` | list | `["session_id"]` | Attribute names to SHA256 hash. |
+| `sampling.default` | float | `1.0` | Default sampling rate (0.0–1.0). |
+| `sampling.rates` | map | `{}` | Per-event-type sampling rate overrides. |
+
+Default redacted attributes: `prompt`, `user.email`, `tool_output`, `tool_input`.
+
+### Resource Attributes (`telemetry.resource`)
+
+Static key-value pairs added to all telemetry events. Useful for tagging deployments.
+
+```yaml
+telemetry:
+  resource:
+    service.name: "scion-agent"
+    deployment.env: "staging"
+```
+
 ## Server Configuration (`server`)
 
-When running the `scion server` (Hub or Broker), configuration is read from the `server` section of `settings.yaml`. 
+When running the `scion server` (Hub or Broker), configuration is read from the `server` section of `settings.yaml`.
 
 See the [Server Configuration Reference](/reference/server-config/) for details.
 
@@ -178,5 +261,12 @@ Settings can be overridden using environment variables with the `SCION_` prefix.
 | `hub.endpoint` | `SCION_HUB_ENDPOINT` |
 | `hub.grove_id` | `SCION_HUB_GROVE_ID` |
 | `cli.autohelp` | `SCION_CLI_AUTOHELP` |
+| `telemetry.enabled` | `SCION_TELEMETRY_ENABLED` |
+| `telemetry.cloud.enabled` | `SCION_TELEMETRY_CLOUD_ENABLED` |
+| `telemetry.cloud.endpoint` | `SCION_OTEL_ENDPOINT` |
+| `telemetry.cloud.protocol` | `SCION_OTEL_PROTOCOL` |
+| `telemetry.cloud.tls.insecure_skip_verify` | `SCION_OTEL_INSECURE` |
+| `telemetry.hub.enabled` | `SCION_TELEMETRY_HUB_ENABLED` |
+| `telemetry.local.enabled` | `SCION_TELEMETRY_DEBUG` |
 
 See [Local Governance](/guides/local-governance/) for more on variable substitution.

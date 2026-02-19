@@ -66,6 +66,25 @@ services:
       target: "localhost:9222"
 ```
 
+### Telemetry (`telemetry`)
+
+Override telemetry settings for this template or agent. These merge on top of any telemetry configuration defined in `settings.yaml` (global or grove scope), using last-write-wins semantics.
+
+```yaml
+telemetry:
+  enabled: true
+  cloud:
+    endpoint: "monitoring.googleapis.com:443"
+  filter:
+    events:
+      exclude:
+        - "agent.user.prompt"
+  resource:
+    service.name: "my-specialized-agent"
+```
+
+See the [Orchestrator Settings Reference](/reference/orchestrator-settings/#telemetry-configuration-telemetry) for the full field reference and the [Metrics guide](/guides/metrics/#configuration-hierarchy) for how telemetry settings merge across scopes.
+
 ### Kubernetes Specifics (`kubernetes`)
 
 Overrides for Kubernetes runtimes.
