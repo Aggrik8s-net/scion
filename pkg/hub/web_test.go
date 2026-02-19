@@ -121,10 +121,15 @@ func TestSPACatchAll(t *testing.T) {
 }
 
 func TestStaticAssetHandler_Disk(t *testing.T) {
-	// Create a temporary directory with a test asset
+	// Create a temporary directory with a test asset under assets/ subdirectory
+	// to match the Vite build output structure (dist/client/assets/main.js).
 	tmpDir := t.TempDir()
+	assetsDir := filepath.Join(tmpDir, "assets")
+	if err := os.MkdirAll(assetsDir, 0755); err != nil {
+		t.Fatalf("failed to create assets dir: %v", err)
+	}
 	testContent := "console.log('test');"
-	if err := os.WriteFile(filepath.Join(tmpDir, "main.js"), []byte(testContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(assetsDir, "main.js"), []byte(testContent), 0644); err != nil {
 		t.Fatalf("failed to write test asset: %v", err)
 	}
 
@@ -156,7 +161,11 @@ func TestStaticAssetHandler_Disk(t *testing.T) {
 
 func TestStaticAssetHandler_HashedCaching(t *testing.T) {
 	tmpDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmpDir, "chunk-abc12345.js"), []byte("// chunk"), 0644); err != nil {
+	assetsDir := filepath.Join(tmpDir, "assets")
+	if err := os.MkdirAll(assetsDir, 0755); err != nil {
+		t.Fatalf("failed to create assets dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(assetsDir, "chunk-abc12345.js"), []byte("// chunk"), 0644); err != nil {
 		t.Fatalf("failed to write test asset: %v", err)
 	}
 
@@ -345,7 +354,9 @@ func TestSessionMiddleware_PublicRoutes(t *testing.T) {
 
 func TestSessionMiddleware_AssetsPublic(t *testing.T) {
 	tmpDir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "test.js"), []byte("//js"), 0644))
+	assetsDir := filepath.Join(tmpDir, "assets")
+	require.NoError(t, os.MkdirAll(assetsDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(assetsDir, "test.js"), []byte("//js"), 0644))
 
 	ws := newTestWebServer(t, WebServerConfig{AssetsDir: tmpDir})
 

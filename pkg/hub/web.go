@@ -397,7 +397,7 @@ func (ws *WebServer) staticHandler() http.Handler {
 		fileServer = http.FileServer(http.FS(ws.assets))
 	}
 
-	return http.StripPrefix("/assets/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Set cache headers based on whether the filename contains a hash.
 		// Vite hashed assets (e.g., chunk-abc123.js) get long-lived caching.
 		// Non-hashed entry points (e.g., main.js) get revalidation.
@@ -407,7 +407,7 @@ func (ws *WebServer) staticHandler() http.Handler {
 			w.Header().Set("Cache-Control", "no-cache")
 		}
 		fileServer.ServeHTTP(w, r)
-	}))
+	})
 }
 
 // isHashedAsset checks if a path looks like it contains a content hash.
