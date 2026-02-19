@@ -23,6 +23,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/store"
 	"github.com/ptone/scion-agent/pkg/store/sqlite"
 )
@@ -1135,5 +1136,68 @@ func TestHTTPAgentDispatcher_DispatchAgentStart_AppliesBrokerResponse(t *testing
 	}
 	if agent.RuntimeState != "container:container-abc" {
 		t.Errorf("expected runtimeState 'container:container-abc', got '%s'", agent.RuntimeState)
+	}
+}
+
+func TestHTTPAgentDispatcher_DispatchAgentCreate_PropagatesGitClone(t *testing.T) {
+	ctx := context.Background()
+	memStore := createTestStore(t)
+
+	broker := &store.RuntimeBroker{
+		ID:       "host-1",
+		Name:     "test-host",
+		Slug:     "test-host",
+		Endpoint: "http://localhost:9800",
+		Status:   store.BrokerStatusOnline,
+	}
+	if err := memStore.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatalf("failed to create runtime broker: %v", err)
+	}
+
+	mockClient := &mockRuntimeBrokerClient{}
+	dispatcher := NewHTTPAgentDispatcherWithClient(memStore, mockClient, false)
+
+	agent := &store.Agent{
+		ID:              "agent-gc-1",
+		Name:            "git-clone-agent",
+		Slug:            "git-clone-agent",
+		GroveID:         "grove-1",
+		RuntimeBrokerID: "host-1",
+		AppliedConfig: &store.AgentAppliedConfig{
+			Harness: "claude",
+			Task:    "implement feature",
+			GitClone: &api.GitCloneConfig{
+				URL:    "https://github.com/example/repo.git",
+				Branch: "develop",
+				Depth:  1,
+			},
+		},
+	}
+
+	err := dispatcher.DispatchAgentCreate(ctx, agent)
+	if err != nil {
+		t.Fatalf("DispatchAgentCreate failed: %v", err)
+	}
+
+	if !mockClient.createCalled {
+		t.Fatal("expected CreateAgent to be called")
+	}
+	if mockClient.lastCreateReq.Config == nil {
+		t.Fatal("expected config to be present")
+	}
+	if mockClient.lastCreateReq.Config.GitClone == nil {
+		t.Fatal("expected GitClone to be propagated in config")
+	}
+	if mockClient.lastCreateReq.Config.GitClone.URL != "https://github.com/example/repo.git" {
+		t.Errorf("expected GitClone URL 'https://github.com/example/repo.git', got '%s'",
+			mockClient.lastCreateReq.Config.GitClone.URL)
+	}
+	if mockClient.lastCreateReq.Config.GitClone.Branch != "develop" {
+		t.Errorf("expected GitClone Branch 'develop', got '%s'",
+			mockClient.lastCreateReq.Config.GitClone.Branch)
+	}
+	if mockClient.lastCreateReq.Config.GitClone.Depth != 1 {
+		t.Errorf("expected GitClone Depth 1, got %d",
+			mockClient.lastCreateReq.Config.GitClone.Depth)
 	}
 }

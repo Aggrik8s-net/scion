@@ -374,6 +374,28 @@ type ResolvedSecret struct {
 	Source string `json:"source"`         // Scope that provided this secret (user, grove, runtime_broker)
 }
 
+// GitCloneConfig specifies how to clone a git repository into the workspace.
+// When present, the runtime skips local worktree creation and workspace
+// mounting — sciontool clones the repo inside the container at startup.
+type GitCloneConfig struct {
+	URL    string `json:"url"`              // HTTPS clone URL (without credentials)
+	Branch string `json:"branch,omitempty"` // Branch to clone (default: main)
+	Depth  int    `json:"depth,omitempty"`  // Clone depth (default: 1, 0 = full)
+}
+
+type gitCloneContextKey struct{}
+
+// ContextWithGitClone returns a new context with the GitCloneConfig attached.
+func ContextWithGitClone(ctx context.Context, gc *GitCloneConfig) context.Context {
+	return context.WithValue(ctx, gitCloneContextKey{}, gc)
+}
+
+// GitCloneFromContext retrieves the GitCloneConfig from the context, or nil if not set.
+func GitCloneFromContext(ctx context.Context) *GitCloneConfig {
+	gc, _ := ctx.Value(gitCloneContextKey{}).(*GitCloneConfig)
+	return gc
+}
+
 type StartOptions struct {
 	Name            string
 	Task            string
@@ -390,6 +412,7 @@ type StartOptions struct {
 	NoAuth          bool
 	Branch          string
 	Workspace       string
+	GitClone        *GitCloneConfig // When set, skip workspace creation; sciontool clones inside container
 }
 
 type StatusEvent struct {

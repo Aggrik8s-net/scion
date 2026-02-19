@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/secret"
 	"github.com/ptone/scion-agent/pkg/storage"
 	"github.com/ptone/scion-agent/pkg/store"
@@ -235,6 +236,11 @@ type RemoteAgentConfig struct {
 	// TemplateHash is the content hash of the template for cache validation.
 	// If the cached template's hash matches, it can be used without re-downloading.
 	TemplateHash string `json:"templateHash,omitempty"`
+
+	// GitClone specifies git clone parameters for git-anchored groves.
+	// When set, the runtime broker skips workspace mounting and injects env vars
+	// so sciontool can clone the repo inside the container.
+	GitClone *api.GitCloneConfig `json:"gitClone,omitempty"`
 }
 
 // RemoteAgentResponse is the response from creating an agent on a remote runtime broker.

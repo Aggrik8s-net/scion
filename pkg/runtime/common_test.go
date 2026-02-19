@@ -331,6 +331,47 @@ func TestBuildCommonRunArgs(t *testing.T) {
 				"-e SCION_HOST_GID=",
 			},
 		},
+		{
+			name: "git clone mode skips workspace mount",
+			config: RunConfig{
+				Harness:      &harness.GeminiCLI{},
+				Name:         "test-agent",
+				UnixUsername: "scion",
+				Image:        "scion-agent:latest",
+				GitClone: &api.GitCloneConfig{
+					URL:    "https://github.com/example/repo.git",
+					Branch: "main",
+					Depth:  1,
+				},
+			},
+			wantIn: []string{
+				"--workdir /workspace",
+			},
+			wantOut: []string{
+				":/workspace",
+			},
+		},
+		{
+			name: "git clone mode with home dir still mounts home",
+			config: RunConfig{
+				Harness:      &harness.GeminiCLI{},
+				Name:         "test-agent",
+				UnixUsername: "scion",
+				Image:        "scion-agent:latest",
+				HomeDir:      tmpHome,
+				GitClone: &api.GitCloneConfig{
+					URL:    "https://github.com/example/repo.git",
+					Branch: "dev",
+				},
+			},
+			wantIn: []string{
+				"--workdir /workspace",
+				fmt.Sprintf("-v %s:/home/scion", tmpHome),
+			},
+			wantOut: []string{
+				":/workspace:",
+			},
+		},
 	}
 
 		for _, tt := range tests {

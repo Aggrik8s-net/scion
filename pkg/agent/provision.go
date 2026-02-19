@@ -115,6 +115,9 @@ func DeleteAgentFiles(agentName string, grovePath string, removeBranch bool) (bo
 }
 
 func (m *AgentManager) Provision(ctx context.Context, opts api.StartOptions) (*api.ScionConfig, error) {
+	if opts.GitClone != nil {
+		ctx = api.ContextWithGitClone(ctx, opts.GitClone)
+	}
 	agentDir, _, _, cfg, err := GetAgent(ctx, opts.Name, opts.Template, opts.Image, opts.HarnessConfig, opts.GrovePath, opts.Profile, "created", opts.Branch, opts.Workspace)
 	if err == nil {
 		_ = UpdateAgentConfig(opts.Name, opts.GrovePath, "created", m.Runtime.Name(), opts.Profile, "")
@@ -185,8 +188,15 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 	var workspaceSource string
 	shouldCreateWorktree := false
 
+	// Check for git clone mode from context
+	gitClone := api.GitCloneFromContext(ctx)
+
 	// Workspace Resolution Logic
-	if workspace != "" {
+	if gitClone != nil {
+		// Git clone mode: skip workspace creation entirely.
+		// sciontool will clone the repo inside the container.
+		agentWorkspace = ""
+	} else if workspace != "" {
 		// Case 1: Explicit Workspace provided
 		// This overrides everything else. We mount this path directly.
 		absWorkspace, err := filepath.Abs(workspace)

@@ -478,6 +478,7 @@ func (d *HTTPAgentDispatcher) buildCreateRequest(ctx context.Context, agent *sto
 			Workspace:    agent.AppliedConfig.Workspace,
 			TemplateID:   agent.AppliedConfig.TemplateID,
 			TemplateHash: agent.AppliedConfig.TemplateHash,
+			GitClone:     agent.AppliedConfig.GitClone,
 		}
 		req.ResolvedEnv = agent.AppliedConfig.Env
 	}

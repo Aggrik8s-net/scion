@@ -40,6 +40,7 @@ type RunConfig struct {
 	Resume          bool
 	Resources       *api.ResourceSpec
 	Kubernetes      *api.KubernetesConfig
+	GitClone        *api.GitCloneConfig
 }
 
 type Runtime interface {

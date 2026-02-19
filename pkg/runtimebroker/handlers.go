@@ -356,6 +356,25 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Git clone mode: inject env vars and skip workspace mounting.
+	if req.Config != nil && req.Config.GitClone != nil {
+		gc := req.Config.GitClone
+		env["SCION_GIT_CLONE_URL"] = gc.URL
+		if gc.Branch != "" {
+			env["SCION_GIT_BRANCH"] = gc.Branch
+		}
+		if gc.Depth > 0 {
+			env["SCION_GIT_DEPTH"] = strconv.Itoa(gc.Depth)
+		}
+		opts.Workspace = ""
+		opts.GrovePath = ""
+		opts.GitClone = gc
+		if s.config.Debug {
+			slog.Debug("Git clone mode enabled",
+				"cloneURL", gc.URL, "branch", gc.Branch, "depth", gc.Depth)
+		}
+	}
+
 	// Always set env (may be empty, which is fine)
 	opts.Env = env
 

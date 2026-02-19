@@ -198,6 +198,11 @@ type CreateAgentConfig struct {
 	// TemplateHash is the content hash of the template for cache validation.
 	// If the cached template's hash matches, it can be used without re-downloading.
 	TemplateHash string `json:"templateHash,omitempty"`
+
+	// GitClone specifies git clone parameters for git-anchored groves.
+	// When set, the broker skips workspace mounting and injects env vars
+	// so sciontool can clone the repo inside the container.
+	GitClone *api.GitCloneConfig `json:"gitClone,omitempty"`
 }
 
 // CreateAgentResponse is the response for creating an agent.

@@ -427,6 +427,23 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Populate GitClone config for git-anchored groves.
+	if grove.GitRemote != "" && agent.AppliedConfig != nil {
+		cloneURL := grove.Labels["scion.dev/clone-url"]
+		if cloneURL == "" {
+			cloneURL = "https://" + grove.GitRemote + ".git"
+		}
+		defaultBranch := grove.Labels["scion.dev/default-branch"]
+		if defaultBranch == "" {
+			defaultBranch = "main"
+		}
+		agent.AppliedConfig.GitClone = &api.GitCloneConfig{
+			URL:    cloneURL,
+			Branch: defaultBranch,
+			Depth:  1,
+		}
+	}
+
 	// Populate template ID, hash, and hub access scopes if template was resolved
 	if resolvedTemplate != nil && agent.AppliedConfig != nil {
 		agent.AppliedConfig.TemplateID = resolvedTemplate.ID

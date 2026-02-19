@@ -74,6 +74,10 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 		}
 	}
 
+	if opts.GitClone != nil {
+		ctx = api.ContextWithGitClone(ctx, opts.GitClone)
+	}
+
 	agentDir, agentHome, agentWorkspace, finalScionCfg, err := GetAgent(ctx, opts.Name, opts.Template, opts.Image, opts.HarnessConfig, opts.GrovePath, opts.Profile, "", opts.Branch, opts.Workspace)
 	if err != nil {
 		return nil, err
@@ -321,7 +325,8 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 			}
 			return nil
 		}(),
-		Resume: opts.Resume,
+		GitClone: opts.GitClone,
+		Resume:   opts.Resume,
 		Labels: map[string]string{
 			"scion.agent":          "true",
 			"scion.name":           opts.Name,

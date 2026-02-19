@@ -881,3 +881,118 @@ func TestCreateAgentHubEndpointFromGroveSettings(t *testing.T) {
 		}
 	})
 }
+
+// gitCloneCapturingManager captures env and GitClone from Start options.
+type gitCloneCapturingManager struct {
+	mockManager
+	lastEnv      map[string]string
+	lastGitClone *api.GitCloneConfig
+	lastWorkspace string
+	lastGrovePath string
+}
+
+func (m *gitCloneCapturingManager) Start(ctx context.Context, opts api.StartOptions) (*api.AgentInfo, error) {
+	m.lastEnv = opts.Env
+	m.lastGitClone = opts.GitClone
+	m.lastWorkspace = opts.Workspace
+	m.lastGrovePath = opts.GrovePath
+	return m.mockManager.Start(ctx, opts)
+}
+
+func newTestServerWithGitCloneCapture() (*Server, *gitCloneCapturingManager) {
+	cfg := DefaultServerConfig()
+	cfg.BrokerID = "test-broker-id"
+	cfg.BrokerName = "test-host"
+	cfg.Debug = true
+
+	mgr := &gitCloneCapturingManager{}
+	rt := &runtime.MockRuntime{}
+
+	return New(cfg, mgr, rt), mgr
+}
+
+func TestCreateAgentWithGitClone(t *testing.T) {
+	srv, mgr := newTestServerWithGitCloneCapture()
+
+	body := `{
+		"name": "git-clone-agent",
+		"config": {
+			"template": "claude",
+			"gitClone": {
+				"url": "https://github.com/example/repo.git",
+				"branch": "develop",
+				"depth": 1
+			}
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, w.Code, w.Body.String())
+	}
+
+	// Verify git clone env vars were injected
+	if mgr.lastEnv == nil {
+		t.Fatal("expected environment variables to be set, got nil")
+	}
+
+	if got := mgr.lastEnv["SCION_GIT_CLONE_URL"]; got != "https://github.com/example/repo.git" {
+		t.Errorf("expected SCION_GIT_CLONE_URL='https://github.com/example/repo.git', got %q", got)
+	}
+	if got := mgr.lastEnv["SCION_GIT_BRANCH"]; got != "develop" {
+		t.Errorf("expected SCION_GIT_BRANCH='develop', got %q", got)
+	}
+	if got := mgr.lastEnv["SCION_GIT_DEPTH"]; got != "1" {
+		t.Errorf("expected SCION_GIT_DEPTH='1', got %q", got)
+	}
+
+	// Verify workspace and grovePath were cleared
+	if mgr.lastWorkspace != "" {
+		t.Errorf("expected workspace to be empty in git clone mode, got '%s'", mgr.lastWorkspace)
+	}
+	if mgr.lastGrovePath != "" {
+		t.Errorf("expected grovePath to be empty in git clone mode, got '%s'", mgr.lastGrovePath)
+	}
+
+	// Verify GitClone was passed through
+	if mgr.lastGitClone == nil {
+		t.Fatal("expected GitClone to be set in StartOptions")
+	}
+	if mgr.lastGitClone.URL != "https://github.com/example/repo.git" {
+		t.Errorf("expected GitClone.URL 'https://github.com/example/repo.git', got '%s'", mgr.lastGitClone.URL)
+	}
+}
+
+func TestCreateAgentWithoutGitClone(t *testing.T) {
+	srv, mgr := newTestServerWithGitCloneCapture()
+
+	body := `{
+		"name": "regular-agent",
+		"config": {"template": "claude"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, w.Code, w.Body.String())
+	}
+
+	// Verify no git clone env vars are set
+	if mgr.lastEnv != nil {
+		if _, exists := mgr.lastEnv["SCION_GIT_CLONE_URL"]; exists {
+			t.Error("expected SCION_GIT_CLONE_URL to NOT be set for regular agent")
+		}
+	}
+
+	// Verify GitClone is nil
+	if mgr.lastGitClone != nil {
+		t.Error("expected GitClone to be nil for regular agent")
+	}
+}

@@ -1242,3 +1242,77 @@ func TestCreateGroveAgent_FallbackToProvisioningWhenNoBrokerStatus(t *testing.T)
 	assert.Equal(t, store.AgentStatusProvisioning, resp.Agent.Status,
 		"agent status should fall back to provisioning when broker doesn't report status")
 }
+
+func TestCreateAgent_GitAnchoredGrovePopulatesGitClone(t *testing.T) {
+	disp := &createAgentDispatcher{createStatus: store.AgentStatusRunning}
+	srv, s, _ := setupCreateAgentServer(t, disp)
+	ctx := context.Background()
+
+	// Create a grove with GitRemote and labels
+	gitGrove := &store.Grove{
+		ID:        "grove-git",
+		Name:      "Git Grove",
+		Slug:      "git-grove",
+		GitRemote: "github.com/example/myrepo",
+		Labels: map[string]string{
+			"scion.dev/clone-url":      "https://github.com/example/myrepo.git",
+			"scion.dev/default-branch": "develop",
+		},
+		DefaultRuntimeBrokerID: "broker-create",
+	}
+	require.NoError(t, s.CreateGrove(ctx, gitGrove))
+
+	// Add grove provider
+	provider := &store.GroveProvider{
+		GroveID:    gitGrove.ID,
+		BrokerID:   "broker-create",
+		BrokerName: "Create Test Broker",
+		Status:     store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.AddGroveProvider(ctx, provider))
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", CreateAgentRequest{
+		Name:    "git-agent",
+		GroveID: gitGrove.ID,
+		Task:    "implement feature",
+	})
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp CreateAgentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Agent)
+
+	// Verify the agent was created — check that AppliedConfig.GitClone was populated
+	persisted, err := s.GetAgent(ctx, resp.Agent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, persisted.AppliedConfig, "AppliedConfig should be set")
+	require.NotNil(t, persisted.AppliedConfig.GitClone, "GitClone should be populated for git-anchored grove")
+	assert.Equal(t, "https://github.com/example/myrepo.git", persisted.AppliedConfig.GitClone.URL)
+	assert.Equal(t, "develop", persisted.AppliedConfig.GitClone.Branch)
+	assert.Equal(t, 1, persisted.AppliedConfig.GitClone.Depth)
+}
+
+func TestCreateAgent_NonGitGroveNoGitClone(t *testing.T) {
+	disp := &createAgentDispatcher{createStatus: store.AgentStatusRunning}
+	srv, s, grove := setupCreateAgentServer(t, disp)
+	ctx := context.Background()
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", CreateAgentRequest{
+		Name:    "non-git-agent",
+		GroveID: grove.ID,
+		Task:    "do something",
+	})
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp CreateAgentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Agent)
+
+	persisted, err := s.GetAgent(ctx, resp.Agent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, persisted.AppliedConfig, "AppliedConfig should be set")
+	assert.Nil(t, persisted.AppliedConfig.GitClone,
+		"GitClone should be nil for non-git-anchored grove")
+}

@@ -90,6 +90,14 @@ func (r *KubernetesRuntime) Run(ctx context.Context, config RunConfig) (string, 
 		config.Annotations["scion.workspace"] = config.Workspace
 	}
 
+	if config.GitClone != nil {
+		if config.Annotations == nil {
+			config.Annotations = make(map[string]string)
+		}
+		config.Annotations["scion.git_clone"] = "true"
+		config.Annotations["scion.git_clone_url"] = config.GitClone.URL
+	}
+
 	if config.HomeDir != "" {
 		if config.Annotations == nil {
 			config.Annotations = make(map[string]string)

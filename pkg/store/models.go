@@ -83,6 +83,7 @@ type AgentAppliedConfig struct {
 	Task    string            `json:"task,omitempty"`      // Initial task/prompt for the agent
 	Attach  bool              `json:"attach,omitempty"`    // If true, signals interactive attach mode to the broker/harness
 	Workspace string          `json:"workspace,omitempty"` // Host path to mount as /workspace (overrides default grove root)
+	GitClone  *api.GitCloneConfig `json:"gitClone,omitempty"`
 
 	// Template info for Runtime Broker hydration
 	TemplateID   string `json:"templateId,omitempty"`   // Hub template ID for fetching
