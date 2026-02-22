@@ -110,6 +110,23 @@ Examples:
 	RunE: runEnvGet,
 }
 
+// hubEnvListCmd lists environment variables
+var hubEnvListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List environment variables",
+	Long: `List all environment variables for a scope from the Hub.
+
+By default, lists user-scoped variables. Use --grove or --broker
+to list variables at different scopes.
+
+Examples:
+  scion hub env list                    # List all user variables
+  scion hub env list --grove            # List grove variables
+  scion hub env list --json             # Output as JSON`,
+	Args: cobra.NoArgs,
+	RunE: runEnvList,
+}
+
 // hubEnvClearCmd clears an environment variable
 var hubEnvClearCmd = &cobra.Command{
 	Use:   "clear KEY",
@@ -128,15 +145,17 @@ func init() {
 	hubCmd.AddCommand(hubEnvCmd)
 	hubEnvCmd.AddCommand(hubEnvSetCmd)
 	hubEnvCmd.AddCommand(hubEnvGetCmd)
+	hubEnvCmd.AddCommand(hubEnvListCmd)
 	hubEnvCmd.AddCommand(hubEnvClearCmd)
 
 	// Add scope flags to all subcommands
-	for _, cmd := range []*cobra.Command{hubEnvSetCmd, hubEnvGetCmd, hubEnvClearCmd} {
+	for _, cmd := range []*cobra.Command{hubEnvSetCmd, hubEnvGetCmd, hubEnvListCmd, hubEnvClearCmd} {
 		cmd.Flags().StringVar(&envGroveScope, "grove", "", "Grove scope (use flag without value to infer from current directory, or provide grove ID)")
 		cmd.Flags().StringVar(&envBrokerScope, "broker", "", "Broker scope (use flag without value to use current broker, or provide broker ID)")
 	}
 
 	hubEnvGetCmd.Flags().BoolVar(&envOutputJSON, "json", false, "Output in JSON format")
+	hubEnvListCmd.Flags().BoolVar(&envOutputJSON, "json", false, "Output in JSON format")
 
 	// Injection mode and secret flags for set command
 	hubEnvSetCmd.Flags().BoolVar(&envAlways, "always", false, "Always inject this variable at its scope")
@@ -361,7 +380,34 @@ func runEnvGet(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// List all variables for scope
+	// No key provided, delegate to list
+	return runEnvList(cmd, nil)
+}
+
+func runEnvList(cmd *cobra.Command, _ []string) error {
+	resolvedPath, _, err := config.ResolveGrovePath(grovePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve grove path: %w", err)
+	}
+
+	settings, err := config.LoadSettings(resolvedPath)
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
+
+	client, err := getHubClient(settings)
+	if err != nil {
+		return err
+	}
+
+	scope, scopeID, err := resolveEnvScope(cmd, settings)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	opts := &hubclient.ListEnvOptions{
 		Scope:   scope,
 		ScopeID: scopeID,

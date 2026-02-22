@@ -121,6 +121,26 @@ Examples:
 	RunE: runSecretGet,
 }
 
+// hubSecretListCmd lists secrets
+var hubSecretListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List secrets",
+	Long: `List all secrets for a scope from the Hub.
+
+Secret values are never returned. This command only shows metadata
+such as the key name, scope, type, version, and timestamps.
+
+By default, lists user-scoped secrets. Use --grove or --broker
+to list secrets at different scopes.
+
+Examples:
+  scion hub secret list                    # List all user secrets
+  scion hub secret list --grove            # List grove secrets
+  scion hub secret list --json             # Output as JSON`,
+	Args: cobra.NoArgs,
+	RunE: runSecretList,
+}
+
 // hubSecretClearCmd clears a secret
 var hubSecretClearCmd = &cobra.Command{
 	Use:   "clear KEY",
@@ -139,15 +159,17 @@ func init() {
 	hubCmd.AddCommand(hubSecretCmd)
 	hubSecretCmd.AddCommand(hubSecretSetCmd)
 	hubSecretCmd.AddCommand(hubSecretGetCmd)
+	hubSecretCmd.AddCommand(hubSecretListCmd)
 	hubSecretCmd.AddCommand(hubSecretClearCmd)
 
 	// Add scope flags to all subcommands
-	for _, cmd := range []*cobra.Command{hubSecretSetCmd, hubSecretGetCmd, hubSecretClearCmd} {
+	for _, cmd := range []*cobra.Command{hubSecretSetCmd, hubSecretGetCmd, hubSecretListCmd, hubSecretClearCmd} {
 		cmd.Flags().StringVar(&secretGroveScope, "grove", "", "Grove scope (use flag without value to infer from current directory, or provide grove ID)")
 		cmd.Flags().StringVar(&secretBrokerScope, "broker", "", "Broker scope (use flag without value to use current broker, or provide broker ID)")
 	}
 
 	hubSecretGetCmd.Flags().BoolVar(&secretOutputJSON, "json", false, "Output in JSON format")
+	hubSecretListCmd.Flags().BoolVar(&secretOutputJSON, "json", false, "Output in JSON format")
 
 	// Type and target flags for set command
 	hubSecretSetCmd.Flags().StringVar(&secretType, "type", "", "Secret type: environment (default), variable, file")
@@ -358,7 +380,34 @@ func runSecretGet(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// List all secrets for scope
+	// No key provided, delegate to list
+	return runSecretList(cmd, nil)
+}
+
+func runSecretList(cmd *cobra.Command, _ []string) error {
+	resolvedPath, _, err := config.ResolveGrovePath(grovePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve grove path: %w", err)
+	}
+
+	settings, err := config.LoadSettings(resolvedPath)
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
+
+	client, err := getHubClient(settings)
+	if err != nil {
+		return err
+	}
+
+	scope, scopeID, err := resolveSecretScope(cmd, settings)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	opts := &hubclient.ListSecretOptions{
 		Scope:   scope,
 		ScopeID: scopeID,

@@ -1,0 +1,202 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package cmd
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// secretTestState captures and restores package-level vars for test isolation.
+type secretTestState struct {
+	home              string
+	grovePath         string
+	secretGroveScope  string
+	secretBrokerScope string
+	secretOutputJSON  bool
+}
+
+func saveSecretTestState() secretTestState {
+	return secretTestState{
+		home:              os.Getenv("HOME"),
+		grovePath:         grovePath,
+		secretGroveScope:  secretGroveScope,
+		secretBrokerScope: secretBrokerScope,
+		secretOutputJSON:  secretOutputJSON,
+	}
+}
+
+func (s secretTestState) restore() {
+	os.Setenv("HOME", s.home)
+	grovePath = s.grovePath
+	secretGroveScope = s.secretGroveScope
+	secretBrokerScope = s.secretBrokerScope
+	secretOutputJSON = s.secretOutputJSON
+}
+
+// setupSecretGrove creates a grove directory with settings pointing to the given hub endpoint.
+func setupSecretGrove(t *testing.T, home, endpoint string) string {
+	t.Helper()
+	groveDir := filepath.Join(home, "project", ".scion")
+	require.NoError(t, os.MkdirAll(groveDir, 0755))
+
+	settings := map[string]interface{}{
+		"grove_id": "test-grove",
+		"hub": map[string]interface{}{
+			"enabled":  true,
+			"endpoint": endpoint,
+		},
+	}
+	data, err := json.Marshal(settings)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(groveDir, "settings.json"), data, 0644))
+
+	return groveDir
+}
+
+// newSecretListMockServer creates a mock Hub server that handles secret list requests.
+func newSecretListMockServer(t *testing.T, secrets []map[string]interface{}) *httptest.Server {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.URL.Path == "/healthz" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok"})
+
+		case r.URL.Path == "/api/v1/secrets" && r.Method == http.MethodGet:
+			scope := r.URL.Query().Get("scope")
+			if scope == "" {
+				scope = "user"
+			}
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"secrets": secrets,
+				"scope":   scope,
+			})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+
+	return server
+}
+
+func TestHubSecretListCmd_Exists(t *testing.T) {
+	// Verify the list subcommand is registered under hub secret.
+	found := false
+	for _, sub := range hubSecretCmd.Commands() {
+		if sub.Use == "list" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "hubSecretCmd should have a 'list' subcommand")
+}
+
+func TestHubSecretListCmd_Flags(t *testing.T) {
+	// Verify required flags are present on the list command.
+	assert.NotNil(t, hubSecretListCmd.Flags().Lookup("grove"), "list command should have --grove flag")
+	assert.NotNil(t, hubSecretListCmd.Flags().Lookup("broker"), "list command should have --broker flag")
+	assert.NotNil(t, hubSecretListCmd.Flags().Lookup("json"), "list command should have --json flag")
+}
+
+func TestHubSecretListCmd_NoArgs(t *testing.T) {
+	// Verify the command accepts no arguments.
+	assert.Equal(t, "list", hubSecretListCmd.Use)
+}
+
+func TestRunSecretList_WithResults(t *testing.T) {
+	orig := saveSecretTestState()
+	defer orig.restore()
+
+	secrets := []map[string]interface{}{
+		{"key": "API_KEY", "type": "environment", "scope": "user", "version": 1, "created": "2026-01-01T00:00:00Z", "updated": "2026-01-01T00:00:00Z"},
+		{"key": "DB_PASSWORD", "type": "environment", "scope": "user", "version": 2, "created": "2026-01-01T00:00:00Z", "updated": "2026-01-02T00:00:00Z"},
+	}
+
+	server := newSecretListMockServer(t, secrets)
+	defer server.Close()
+
+	tmpHome := t.TempDir()
+	os.Setenv("HOME", tmpHome)
+	t.Setenv("SCION_HUB_ENDPOINT", server.URL)
+
+	groveDir := setupSecretGrove(t, tmpHome, server.URL)
+	grovePath = groveDir
+
+	secretOutputJSON = false
+	secretGroveScope = ""
+	secretBrokerScope = ""
+
+	err := runSecretList(hubSecretListCmd, nil)
+	assert.NoError(t, err)
+}
+
+func TestRunSecretList_Empty(t *testing.T) {
+	orig := saveSecretTestState()
+	defer orig.restore()
+
+	server := newSecretListMockServer(t, []map[string]interface{}{})
+	defer server.Close()
+
+	tmpHome := t.TempDir()
+	os.Setenv("HOME", tmpHome)
+	t.Setenv("SCION_HUB_ENDPOINT", server.URL)
+
+	groveDir := setupSecretGrove(t, tmpHome, server.URL)
+	grovePath = groveDir
+
+	secretOutputJSON = false
+	secretGroveScope = ""
+	secretBrokerScope = ""
+
+	err := runSecretList(hubSecretListCmd, nil)
+	assert.NoError(t, err)
+}
+
+func TestRunSecretList_JSON(t *testing.T) {
+	orig := saveSecretTestState()
+	defer orig.restore()
+
+	secrets := []map[string]interface{}{
+		{"key": "MY_SECRET", "type": "variable", "scope": "user", "version": 1, "created": "2026-01-01T00:00:00Z", "updated": "2026-01-01T00:00:00Z"},
+	}
+
+	server := newSecretListMockServer(t, secrets)
+	defer server.Close()
+
+	tmpHome := t.TempDir()
+	os.Setenv("HOME", tmpHome)
+	t.Setenv("SCION_HUB_ENDPOINT", server.URL)
+
+	groveDir := setupSecretGrove(t, tmpHome, server.URL)
+	grovePath = groveDir
+
+	secretOutputJSON = true
+	secretGroveScope = ""
+	secretBrokerScope = ""
+
+	err := runSecretList(hubSecretListCmd, nil)
+	assert.NoError(t, err)
+}
