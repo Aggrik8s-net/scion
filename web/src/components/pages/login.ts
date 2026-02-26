@@ -147,6 +147,21 @@ export class ScionLoginPage extends LitElement {
       color: #991b1b;
     }
 
+    .error-action {
+      display: block;
+      margin-top: 0.5rem;
+    }
+
+    .error-action a {
+      color: #991b1b;
+      font-weight: 500;
+      text-decoration: underline;
+    }
+
+    .error-action a:hover {
+      color: #7f1d1d;
+    }
+
     .providers {
       display: flex;
       flex-direction: column;
@@ -345,7 +360,16 @@ export class ScionLoginPage extends LitElement {
           ? html`
               <div class="error-alert" role="alert">
                 <sl-icon name="exclamation-triangle"></sl-icon>
-                <span class="error-message">${this.error}</span>
+                <div>
+                  <span class="error-message">${this.getErrorMessage()}</span>
+                  ${this.error === 'session_error'
+                    ? html`
+                        <span class="error-action">
+                          <a href="/auth/logout">Clear session and try again</a>
+                        </span>
+                      `
+                    : ''}
+                </div>
               </div>
             `
           : ''}
@@ -369,6 +393,22 @@ export class ScionLoginPage extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  private getErrorMessage(): string {
+    const messages: Record<string, string> = {
+      session_error:
+        'Your session could not be saved. This is usually caused by a stale browser cookie.',
+      state_mismatch:
+        'Login verification failed. Please try signing in again.',
+      exchange_failed:
+        'Could not complete sign-in with the provider. Please try again.',
+      unauthorized_domain:
+        'Your email domain is not authorized to access this application.',
+      user_create_failed:
+        'Could not create your account. Please contact an administrator.',
+    };
+    return messages[this.error] ?? this.error;
   }
 
   private getProviders(): OAuthProvider[] {

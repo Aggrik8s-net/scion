@@ -24,6 +24,8 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -131,7 +133,7 @@ type WebServer struct {
 	assets       fs.FS              // embedded or nil
 	assetsDisk   string             // filesystem override path, or ""
 	shellTmpl    *template.Template
-	sessionStore *sessions.CookieStore
+	sessionStore *sessions.FilesystemStore
 	oauthService *OAuthService
 	store        store.Store
 	userTokenSvc *UserTokenService
@@ -339,15 +341,22 @@ func NewWebServer(cfg WebServerConfig) *WebServer {
 		slog.Warn("No session secret configured, using random key (sessions will not persist across restarts)")
 	}
 
-	cookieStore := sessions.NewCookieStore([]byte(sessionKey))
-	cookieStore.Options = &sessions.Options{
+	// Use a filesystem-backed session store so that only a small session ID
+	// is sent as a cookie. This avoids the 4 KB cookie size limit that can
+	// be exceeded when JWT tokens are stored in the session.
+	sessionDir := filepath.Join(os.TempDir(), "scion-sessions")
+	if err := os.MkdirAll(sessionDir, 0700); err != nil {
+		slog.Error("Failed to create session directory", "dir", sessionDir, "error", err)
+	}
+	fsStore := sessions.NewFilesystemStore(sessionDir, []byte(sessionKey))
+	fsStore.Options = &sessions.Options{
 		Path:     "/",
 		MaxAge:   86400, // 24 hours
 		HttpOnly: true,
 		Secure:   strings.HasPrefix(cfg.BaseURL, "https://"),
 		SameSite: http.SameSiteLaxMode,
 	}
-	ws.sessionStore = cookieStore
+	ws.sessionStore = fsStore
 
 	// Resolve asset source
 	if cfg.AssetsDir != "" {
