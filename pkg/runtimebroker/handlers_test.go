@@ -1337,3 +1337,79 @@ func TestCreateAgentRequest_GroveSlugField(t *testing.T) {
 		t.Errorf("expected WorkspaceStoragePath 'workspaces/grove-123/grove-workspace', got '%s'", req.WorkspaceStoragePath)
 	}
 }
+
+func TestCreateAgentGroveSlugResolvesGrovePath(t *testing.T) {
+	// When GroveSlug is set and GrovePath is empty (hub-native grove with no
+	// local provider path), the handler should resolve GrovePath to the
+	// conventional ~/.scion/groves/<slug>/ path so the agent is created in the
+	// correct grove instead of the broker's local grove.
+	srv, mgr := newTestServerWithProvisionCapture()
+
+	body := `{
+		"name": "hub-native-agent",
+		"id": "agent-uuid-123",
+		"slug": "hub-native-agent",
+		"groveId": "grove-abc",
+		"groveSlug": "my-hub-grove",
+		"provisionOnly": true,
+		"config": {"template": "claude"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, w.Code, w.Body.String())
+	}
+
+	if !mgr.provisionCalled {
+		t.Fatal("expected Provision to be called")
+	}
+
+	globalDir, err := config.GetGlobalDir()
+	if err != nil {
+		t.Fatalf("failed to get global dir: %v", err)
+	}
+
+	expectedPath := filepath.Join(globalDir, "groves", "my-hub-grove")
+	if mgr.lastOpts.GrovePath != expectedPath {
+		t.Errorf("expected GrovePath %q, got %q", expectedPath, mgr.lastOpts.GrovePath)
+	}
+}
+
+func TestCreateAgentGroveSlugNotUsedWhenGrovePathSet(t *testing.T) {
+	// When both GrovePath and GroveSlug are set, GrovePath takes precedence
+	// (the broker has a local provider path for this grove).
+	srv, mgr := newTestServerWithProvisionCapture()
+
+	body := `{
+		"name": "local-grove-agent",
+		"id": "agent-uuid-456",
+		"slug": "local-grove-agent",
+		"groveId": "grove-def",
+		"groveSlug": "my-hub-grove",
+		"grovePath": "/projects/my-local-grove/.scion",
+		"provisionOnly": true,
+		"config": {"template": "claude"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, w.Code, w.Body.String())
+	}
+
+	if !mgr.provisionCalled {
+		t.Fatal("expected Provision to be called")
+	}
+
+	// GrovePath should remain as explicitly provided, not overridden by GroveSlug
+	if mgr.lastOpts.GrovePath != "/projects/my-local-grove/.scion" {
+		t.Errorf("expected GrovePath %q, got %q", "/projects/my-local-grove/.scion", mgr.lastOpts.GrovePath)
+	}
+}
