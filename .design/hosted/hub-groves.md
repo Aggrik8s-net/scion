@@ -174,7 +174,7 @@ The existing `populateAgentConfig()` in `pkg/hub/handlers.go:4397` populates `Gi
 
 ### Q3: What happens when a hub-native grove is deleted?
 
-**Decision: Soft delete only.** The grove record is marked deleted in the database (existing behavior), but the filesystem directory is preserved. A separate `grove purge` / `grove prune` operation for filesystem cleanup is deferred as a future hub admin/maintenance feature.
+**Decision: Full cleanup.** The grove record is deleted from the database, and the filesystem directory at `~/.scion/groves/<slug>/` is removed. When `deleteAgents=true` is passed, agent deletions are dispatched to their runtime brokers before the grove record is deleted (so containers are stopped and agent files are cleaned up). Database cascade handles removal of agent, template, and provider records.
 
 ### Q4: Should hub-native groves be promotable to git-remote groves?
 
@@ -280,7 +280,7 @@ pending
 ### Future Improvements
 
 - **Optional git init at creation**: Allow an optional `--git` argument when creating hub-native groves to auto-initialize a git repository.
-- **Filesystem purge/prune**: Hub admin/maintenance tooling to clean up filesystem directories for soft-deleted groves.
+- ~~**Filesystem purge/prune**: Hub admin/maintenance tooling to clean up filesystem directories for soft-deleted groves.~~ (Implemented: grove deletion now removes filesystem directories.)
 - **Storage quotas**: Per-user and per-grove disk usage limits for multi-tenant deployments.
 - **Web file browser**: Browse and edit grove workspace files through the web UI.
 

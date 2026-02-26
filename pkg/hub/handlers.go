@@ -2755,6 +2755,21 @@ func (s *Server) updateGrove(w http.ResponseWriter, r *http.Request, id string) 
 func (s *Server) deleteGrove(w http.ResponseWriter, r *http.Request, id string) {
 	ctx := r.Context()
 
+	// Fetch the grove record before deletion so we can clean up the filesystem.
+	grove, err := s.store.GetGrove(ctx, id)
+	if err != nil {
+		writeErrorFromErr(w, err, "")
+		return
+	}
+
+	// Dispatch agent deletions to runtime brokers so containers are stopped
+	// and agent files are cleaned up. The DB cascade will remove agent records,
+	// but we need the broker to tear down the actual resources first.
+	deleteAgents := r.URL.Query().Get("deleteAgents") == "true"
+	if deleteAgents {
+		s.deleteGroveAgents(ctx, grove)
+	}
+
 	// Clean up the associated grove_agents group (best-effort)
 	if groveGroup, err := s.store.GetGroupByGroveID(ctx, id); err == nil {
 		if delErr := s.store.DeleteGroup(ctx, groveGroup.ID); delErr != nil {
@@ -2767,9 +2782,46 @@ func (s *Server) deleteGrove(w http.ResponseWriter, r *http.Request, id string) 
 		return
 	}
 
+	// For hub-native groves (no git remote), remove the filesystem directory.
+	if grove.GitRemote == "" && grove.Slug != "" {
+		if grovePath, err := hubNativeGrovePath(grove.Slug); err == nil {
+			if err := util.RemoveAllSafe(grovePath); err != nil {
+				slog.Warn("failed to remove hub-native grove directory",
+					"grove", id, "slug", grove.Slug, "path", grovePath, "error", err)
+			}
+		}
+	}
+
 	s.events.PublishGroveDeleted(ctx, id)
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteGroveAgents dispatches deletion of all agents in a grove to their
+// runtime brokers. This is best-effort: failures are logged but do not block
+// grove deletion. The database cascade will remove agent records regardless.
+func (s *Server) deleteGroveAgents(ctx context.Context, grove *store.Grove) {
+	dispatcher := s.GetDispatcher()
+
+	result, err := s.store.ListAgents(ctx, store.AgentFilter{GroveID: grove.ID}, store.ListOptions{Limit: 1000})
+	if err != nil {
+		slog.Warn("failed to list agents for grove deletion", "grove", grove.ID, "error", err)
+		return
+	}
+
+	now := time.Now()
+	for _, agent := range result.Items {
+		if agent.Status == store.AgentStatusDeleted {
+			continue
+		}
+		if dispatcher != nil && agent.RuntimeBrokerID != "" {
+			if err := dispatcher.DispatchAgentDelete(ctx, &agent, true, true, false, now); err != nil {
+				slog.Warn("failed to dispatch agent delete during grove deletion",
+					"agent", agent.ID, "broker", agent.RuntimeBrokerID, "error", err)
+			}
+		}
+		s.events.PublishAgentDeleted(ctx, agent.ID, agent.GroveID)
+	}
 }
 
 // ============================================================================

@@ -287,6 +287,109 @@ func TestCreateGrove_HubNative_AutoProvide(t *testing.T) {
 
 // TestCreateAgent_HubNativeGrove_NoProviders_NoBroker tests that creating an agent
 // in a hub-native grove with no providers and no explicit broker returns an appropriate error.
+func TestDeleteGrove_HubNative_RemovesFilesystem(t *testing.T) {
+	srv, s := testServer(t)
+
+	// Create a hub-native grove via the API (initializes filesystem)
+	grove, workspacePath := createTestHubNativeGrove(t, srv, "FS Delete Test")
+
+	// Verify filesystem exists before deletion
+	_, err := os.Stat(workspacePath)
+	require.NoError(t, err, "workspace should exist before deletion")
+
+	// Delete grove via API
+	rec := doRequest(t, srv, http.MethodDelete, "/api/v1/groves/"+grove.ID, nil)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+
+	// Verify filesystem was removed
+	_, err = os.Stat(workspacePath)
+	assert.True(t, os.IsNotExist(err), "workspace should be deleted from filesystem")
+
+	// Verify grove deleted from database
+	ctx := context.Background()
+	_, err = s.GetGrove(ctx, grove.ID)
+	assert.ErrorIs(t, err, store.ErrNotFound, "grove should be deleted from database")
+}
+
+func TestDeleteGrove_GitBacked_NoFilesystemCleanup(t *testing.T) {
+	srv, s := testServer(t)
+
+	// Create a git-backed grove (no filesystem initialization)
+	grove := createTestGitGrove(t, srv, "Git Delete Test", "github.com/test/git-delete-repo")
+
+	// Delete grove via API
+	rec := doRequest(t, srv, http.MethodDelete, "/api/v1/groves/"+grove.ID, nil)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+
+	// Verify grove deleted from database
+	ctx := context.Background()
+	_, err := s.GetGrove(ctx, grove.ID)
+	assert.ErrorIs(t, err, store.ErrNotFound, "grove should be deleted from database")
+}
+
+func TestDeleteGrove_DeleteAgents_DispatchesToBroker(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	// Set up a mock dispatcher to track agent deletion
+	disp := &deleteDispatcher{}
+	srv.SetDispatcher(disp)
+
+	grove, _, _ := setupOnlineBrokerAgent(t, s, "grove-del")
+
+	// Create a second agent in the same grove
+	agent2 := &store.Agent{
+		ID:              "agent-online-grove-del-2",
+		Slug:            "agent-online-grove-del-2-slug",
+		Name:            "Agent Online grove-del 2",
+		GroveID:         grove.ID,
+		RuntimeBrokerID: "broker-online-grove-del",
+		Status:          store.AgentStatusRunning,
+	}
+	require.NoError(t, s.CreateAgent(ctx, agent2))
+
+	// Delete grove with deleteAgents=true
+	rec := doRequest(t, srv, http.MethodDelete,
+		"/api/v1/groves/"+grove.ID+"?deleteAgents=true", nil)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+
+	// Verify dispatcher was called for both agents
+	assert.Equal(t, 2, disp.deleteCalls,
+		"DispatchAgentDelete should be called once per agent")
+
+	// Verify grove deleted from database
+	_, err := s.GetGrove(ctx, grove.ID)
+	assert.ErrorIs(t, err, store.ErrNotFound)
+
+	// Verify agents cascade-deleted from database
+	_, err = s.GetAgent(ctx, "agent-online-grove-del")
+	assert.ErrorIs(t, err, store.ErrNotFound)
+	_, err = s.GetAgent(ctx, agent2.ID)
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestDeleteGrove_WithoutDeleteAgents_SkipsBrokerDispatch(t *testing.T) {
+	srv, s := testServer(t)
+
+	disp := &deleteDispatcher{}
+	srv.SetDispatcher(disp)
+
+	grove, _, _ := setupOnlineBrokerAgent(t, s, "grove-nodelflag")
+
+	// Delete grove without deleteAgents flag
+	rec := doRequest(t, srv, http.MethodDelete, "/api/v1/groves/"+grove.ID, nil)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+
+	// Dispatcher should NOT have been called
+	assert.Equal(t, 0, disp.deleteCalls,
+		"DispatchAgentDelete should not be called without deleteAgents flag")
+
+	// Grove should still be deleted from database (cascade deletes agent records)
+	ctx := context.Background()
+	_, err := s.GetGrove(ctx, grove.ID)
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
 func TestCreateAgent_HubNativeGrove_NoProviders_NoBroker(t *testing.T) {
 	srv, s := testServer(t)
 	ctx := context.Background()
