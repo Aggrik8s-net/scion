@@ -19,7 +19,7 @@ Today, adding each new scheduled task means adding another ad-hoc goroutine and 
 2. **1-minute granularity** for recurring timers — a root heartbeat ticker at 1-minute intervals drives all recurring work.
 3. **Sub-minute precision** for one-shot scheduled events, specified as either an absolute datetime or a duration-from-now.
 4. **In-memory timer management** using Go's `time.Timer` and `time.Ticker`, with persistence in the database for durability across restarts.
-5. **Built-in recurring task: agent heartbeat timeout** — mark agents as `undetermined` when their last heartbeat exceeds a configurable threshold.
+5. **Built-in recurring task: agent heartbeat timeout** — mark agents as `undetermined` when their last heartbeat exceeds a fixed threshold (2 minutes).
 6. **Extensible design** for future user-defined schedules (cron format) and scheduled messaging.
 
 ### Non-Goals (This Iteration)
@@ -304,7 +304,7 @@ type ScheduledEvent struct {
     Status    string    `json:"status"`      // pending, fired, cancelled, expired
     CreatedAt time.Time `json:"createdAt"`
     CreatedBy string    `json:"createdBy"`
-    FiredAt   time.Time `json:"firedAt,omitempty"`
+    FiredAt   *time.Time `json:"firedAt,omitempty"`
     Error     string    `json:"error,omitempty"`
 }
 
@@ -463,7 +463,7 @@ func (s *Scheduler) CancelEvent(ctx context.Context, id string) error {
 
 ### 3. Built-In Recurring Handler: Agent Heartbeat Timeout
 
-This is the first built-in recurring handler. It detects agents whose `last_seen` timestamp is older than a configurable threshold and marks them as `undetermined`.
+This is the first built-in recurring handler. It detects agents whose `last_seen` timestamp is older than a fixed 2-minute threshold and marks them as `undetermined`.
 
 #### New Agent Status
 
@@ -478,39 +478,14 @@ The `undetermined` status indicates the Hub has lost confidence in the agent's a
 
 Any subsequent heartbeat or status update from the agent (via `UpdateAgentStatus`) clears `undetermined` and sets the agent to whatever status the update carries. No special "reset from undetermined" logic is needed — the normal status update flow handles it.
 
-#### Handler Implementation
-
-```go
-// agentHeartbeatTimeoutHandler returns a recurring handler function that
-// marks agents as undetermined when their last heartbeat is stale.
-func (s *Server) agentHeartbeatTimeoutHandler() func(ctx context.Context) {
-    return func(ctx context.Context) {
-        threshold := time.Now().Add(-2 * time.Minute)
-
-        updated, err := s.store.MarkStaleAgentsUndetermined(ctx, threshold)
-        if err != nil {
-            slog.Error("Scheduler: heartbeat timeout check failed", "error", err)
-            return
-        }
-
-        if updated > 0 {
-            slog.Info("Scheduler: marked stale agents as undetermined",
-                "count", updated, "threshold", threshold)
-        }
-    }
-}
-```
-
 #### Store Query
 
 A new method on `AgentStore`:
 
 ```go
-// MarkStaleAgentsUndetermined marks all agents whose last_seen is before the
-// threshold as "undetermined", provided they are not already in a terminal or
-// inactive state (stopped, completed, error, deleted, restored, undetermined).
-// Returns the number of agents updated.
-MarkStaleAgentsUndetermined(ctx context.Context, threshold time.Time) (int, error)
+// MarkStaleAgentsUndetermined marks agents with stale heartbeats as undetermined.
+// Returns the updated agent records (for event publishing).
+MarkStaleAgentsUndetermined(ctx context.Context, threshold time.Time) ([]Agent, error)
 ```
 
 SQL implementation:
@@ -531,17 +506,13 @@ This query:
 - Excludes agents that haven't started yet (`created`, `pending`).
 - Effectively targets agents in: `running`, `busy`, `idle`, `waiting_for_input`, `provisioning`, `cloning`.
 
-#### Event Publishing
+#### Handler Implementation
 
-When agents are marked as undetermined, the handler should publish status events so the notification system and SSE subscribers are informed. Two approaches:
-
-**Option A (Batch query + individual events):** The `MarkStaleAgentsUndetermined` store method returns the list of affected agent IDs. The handler iterates and publishes `AgentStatus` events for each. This is simpler but means the store method returns more data.
-
-**Option B (Store-only, poll-driven):** The store update happens silently. Consumers detect the change on their next read. This is simpler but breaks the real-time notification contract.
-
-**Selected: Option A.** Returning affected agent IDs from the store method and publishing events maintains consistency with the existing event-driven architecture:
+The handler publishes status events for each affected agent so SSE subscribers and the notification system are informed, consistent with the existing event-driven architecture:
 
 ```go
+// agentHeartbeatTimeoutHandler returns a recurring handler function that
+// marks agents as undetermined when their last heartbeat is stale.
 func (s *Server) agentHeartbeatTimeoutHandler() func(ctx context.Context) {
     return func(ctx context.Context) {
         threshold := time.Now().Add(-2 * time.Minute)
@@ -564,38 +535,7 @@ func (s *Server) agentHeartbeatTimeoutHandler() func(ctx context.Context) {
 }
 ```
 
-Updated store signature:
-
-```go
-// MarkStaleAgentsUndetermined marks agents with stale heartbeats as undetermined.
-// Returns the updated agent records (for event publishing).
-MarkStaleAgentsUndetermined(ctx context.Context, threshold time.Time) ([]Agent, error)
-```
-
-#### Configuration
-
-The heartbeat timeout threshold should be configurable via `ServerConfig`:
-
-```go
-type ServerConfig struct {
-    // ... existing fields ...
-
-    // HeartbeatTimeout is the duration after which an agent with no heartbeat
-    // is marked as undetermined. Default: 2 minutes. Set to 0 to disable.
-    HeartbeatTimeout time.Duration
-}
-```
-
-The recurring handler interval should be half the timeout (or 1 minute, whichever is greater) to ensure timely detection:
-
-```go
-// In Hub server setup:
-if cfg.HeartbeatTimeout > 0 {
-    intervalMinutes := max(1, int(cfg.HeartbeatTimeout.Minutes()) / 2)
-    scheduler.RegisterRecurring("agent-heartbeat-timeout", intervalMinutes,
-        srv.agentHeartbeatTimeoutHandler())
-}
-```
+The 2-minute timeout is hardcoded in the handler. The recurring handler runs every 1 minute to ensure timely detection. Per-agent or per-grove configurability can be added later if needed.
 
 ### 4. Migrating the Purge Loop
 
@@ -605,11 +545,35 @@ The existing `startPurgeLoop` should be migrated into the scheduler as a recurri
 if cfg.SoftDeleteRetention > 0 {
     intervalMinutes := 60 // Check every hour
     scheduler.RegisterRecurring("soft-delete-purge", intervalMinutes,
-        srv.purgeExpiredAgentsHandler())
+        srv.purgeHandler())
 }
 ```
 
-The existing `purgeExpiredAgents` method becomes the handler function with no changes to its logic.
+The handler combines the existing `purgeExpiredAgents` logic with cleanup of completed scheduled events:
+
+```go
+func (s *Server) purgeHandler() func(ctx context.Context) {
+    return func(ctx context.Context) {
+        // Purge soft-deleted agents
+        cutoff := time.Now().Add(-s.config.SoftDeleteRetention)
+        purged, err := s.store.PurgeDeletedAgents(ctx, cutoff)
+        if err != nil {
+            slog.Error("Scheduler: agent purge failed", "error", err)
+        } else if purged > 0 {
+            slog.Info("Scheduler: purged soft-deleted agents", "count", purged)
+        }
+
+        // Purge old scheduled events (non-pending, older than 7 days)
+        eventCutoff := time.Now().Add(-7 * 24 * time.Hour)
+        purgedEvents, err := s.store.PurgeOldScheduledEvents(ctx, eventCutoff)
+        if err != nil {
+            slog.Error("Scheduler: scheduled event purge failed", "error", err)
+        } else if purgedEvents > 0 {
+            slog.Info("Scheduler: purged old scheduled events", "count", purgedEvents)
+        }
+    }
+}
+```
 
 ### 5. Hub Server Integration
 
@@ -628,15 +592,12 @@ type Server struct {
 srv.scheduler = NewScheduler(srv.store, srv.events, srv.GetDispatcher())
 
 // Register built-in recurring handlers
-if srv.config.HeartbeatTimeout > 0 {
-    srv.scheduler.RegisterRecurring("agent-heartbeat-timeout",
-        max(1, int(srv.config.HeartbeatTimeout.Minutes())/2),
-        srv.agentHeartbeatTimeoutHandler())
-}
+srv.scheduler.RegisterRecurring("agent-heartbeat-timeout", 1,
+    srv.agentHeartbeatTimeoutHandler())
 
 if srv.config.SoftDeleteRetention > 0 {
     srv.scheduler.RegisterRecurring("soft-delete-purge", 60,
-        srv.purgeExpiredAgentsHandler())
+        srv.purgeHandler())
 }
 ```
 
@@ -707,6 +668,29 @@ The `ctx` passed to handlers is derived from the server's context. When `Stop()`
 
 ---
 
+## Design Considerations
+
+### Handler Goroutine Lifecycle on Shutdown
+
+The `Stop()` method closes `stopCh` (preventing new ticks) and cancels all one-shot timer contexts, then calls `wg.Wait()` to wait for the root ticker goroutine to exit. However, recurring handler goroutines spawned by `runRecurringHandlers` are not tracked by the WaitGroup. This means `Stop()` may return while handler goroutines are still running.
+
+This is acceptable for the initial implementation because:
+- Recurring handlers have a 55-second context timeout, so they won't run indefinitely.
+- The handler contexts are derived from the server's parent context, which is cancelled during server shutdown — so handlers will observe cancellation promptly.
+- One-shot timer handlers have their own `Cancel` functions called explicitly in `Stop()`.
+
+If precise shutdown sequencing becomes important (e.g., for graceful database connection closing), a separate `sync.WaitGroup` for active handler goroutines can be added.
+
+### Startup Burst for Expired One-Shot Timers
+
+When the Hub restarts after downtime, `loadPersistedTimers` fires all expired timers concurrently via `go s.fireEvent(...)`. If many timers expired during downtime, this creates a burst of goroutines and potentially a burst of database/event operations. For the initial implementation this is acceptable given expected volumes, but batching or rate-limiting could be added if needed.
+
+### RegisterRecurring Thread Safety
+
+`RegisterRecurring` is not thread-safe — it appends to a slice without synchronization. This is by design: all handlers must be registered before `Start()` is called. This precondition should be documented on the method.
+
+---
+
 ## Approaches Considered
 
 ### Approach A: Unified Scheduler Component (Selected)
@@ -760,31 +744,45 @@ Offload scheduling to an external system that calls Hub API endpoints at the app
 
 ---
 
+## Decisions
+
+The following questions were raised during design review and have been resolved:
+
+### 1. `undetermined` notifications — No (default set)
+
+`UNDETERMINED` is not added to the default notification trigger set. It is an infrastructure signal, not a task-level status change. However, this should be surfaced through user-configurable notification preferences in a future iteration, since an `undetermined` agent may need human attention.
+
+### 2. Heartbeat timeout configurability — Hardcoded
+
+The 2-minute timeout is hardcoded directly in the handler function. No `ServerConfig` field is added. This avoids configuration surface area for a value that doesn't need to vary yet. Per-agent or hub-wide configurability can be introduced later if needed.
+
+### 3. One-shot timer retry — No
+
+No retry on failure. Failed events are logged and marked with an error message. Retry with backoff can be added to the `scheduled_events` table in a future enhancement if needed.
+
+### 4. Event payload validation — Basic
+
+Validate `event_type` against known types and perform basic payload structure validation at creation time. Unknown types are rejected. Full schema validation per event type is deferred.
+
+### 5. One-shot timer horizon — Load all, improve later
+
+All pending timers are loaded into memory on startup regardless of how far in the future they fire. This is simple and correct. **Future improvement:** adopt a horizon-based approach where only timers within the next N hours are loaded into memory, with a recurring handler that promotes timers from DB to memory as they approach their fire time.
+
+### 6. Scheduled event cleanup — Part of purge
+
+Non-pending scheduled events older than 7 days are cleaned up by the existing purge recurring handler. This is implemented in the `purgeHandler` (see Section 4).
+
+---
+
 ## Open Questions
 
-### 1. Should `undetermined` trigger notifications?
+### 1. Broker disconnect as a signal for `undetermined`
 
-The existing notification system watches for specific statuses (`COMPLETED`, `WAITING_FOR_INPUT`, `LIMITS_EXCEEDED`). Should `UNDETERMINED` be added to the default trigger set? Leaning toward **no** for the default set — `undetermined` is an infrastructure signal, not a task-level status change. Operators who care can configure custom subscriptions once the subscription API supports it.
+When a Runtime Broker disconnects from the Hub, all agents on that broker become unreachable. Currently, those agents will be marked `undetermined` only after their `last_seen` exceeds the 2-minute heartbeat timeout. An alternative would be to immediately mark all agents on a disconnected broker as `undetermined` at the time of disconnect, rather than waiting for the timeout. This would provide faster detection but adds coupling between broker lifecycle events and agent status management. Worth considering for a future iteration.
 
-### 2. Heartbeat timeout threshold configurability
+### 2. Tick-zero behavior for long-interval handlers
 
-Should the 2-minute threshold be configurable per-grove or per-agent, or is a single hub-wide setting sufficient? **Recommendation:** Hub-wide for now. Per-agent timeouts add complexity (the bulk `UPDATE` query would need to join against per-agent settings) and can be added later.
-
-### 3. Should one-shot timers support retry?
-
-If a one-shot event handler fails, should the scheduler retry? **Recommendation:** No retry in the initial implementation. Failed events are logged and marked with an error message. A future enhancement could add a retry count and backoff to the `scheduled_events` table.
-
-### 4. Event payload schema validation
-
-Should the scheduler validate one-shot event payloads against a schema when they are created? **Recommendation:** Validate the `event_type` against known types and perform basic payload structure validation. Unknown types are rejected at creation time.
-
-### 5. Maximum one-shot timer horizon
-
-Should there be a limit on how far in the future a one-shot event can be scheduled? Long-horizon timers (days, weeks) work fine with `time.AfterFunc` but consume memory. For very long delays, a hybrid approach — store in DB, only load timers within the next N hours into memory — may be warranted. **Recommendation:** For the initial implementation, load all pending timers into memory. Add a horizon limit if memory becomes a concern.
-
-### 6. Scheduled event cleanup
-
-The `scheduled_events` table will accumulate `fired`, `expired`, and `cancelled` records over time. The purge loop should include cleanup of old scheduled events (e.g., older than 7 days). This can be registered as another recurring handler.
+On startup (tick 0), `runRecurringHandlers` runs all handlers where `tickCount % interval == 0`. Since `tickCount` starts at 0, **every** handler runs immediately on startup, including the 60-minute purge handler. This is the current behavior of the existing `startPurgeLoop` (which also runs immediately), so it's consistent. However, if future handlers should *not* run on startup, the registration API may need an option to skip tick 0.
 
 ---
 
@@ -822,6 +820,10 @@ These would create `scheduled_events` (one-shot) or recurring handler registrati
 - **API**: `GET /api/v1/scheduler/status` — list registered recurring handlers and their last run time; list active one-shot timers.
 - **Logging**: Structured logging with handler names and tick counts for tracing.
 
+### Horizon-Based Timer Loading
+
+The initial implementation loads all pending one-shot timers into memory on startup. If the number of long-horizon timers grows large (hundreds or thousands scheduled days/weeks out), a hybrid approach would reduce memory usage: only load timers within the next N hours into memory, and add a recurring handler that periodically promotes upcoming timers from the database.
+
 ### Distributed Scheduling
 
 When the Hub moves to a multi-node deployment, the scheduler will need leader election to ensure only one Hub instance runs the recurring handlers and fires one-shot timers. This aligns with the broader `PostgresEventPublisher` migration path. Options include:
@@ -843,23 +845,22 @@ When the Hub moves to a multi-node deployment, the scheduler will need leader el
 ### Phase 2: Agent Heartbeat Timeout
 6. Add `AgentStatusUndetermined` constant to `pkg/store/models.go`.
 7. Add `MarkStaleAgentsUndetermined` to `AgentStore` interface and SQLite implementation.
-8. Implement heartbeat timeout recurring handler.
-9. Add `HeartbeatTimeout` to `ServerConfig` with a 2-minute default.
-10. Wire handler registration into server setup.
-11. Tests for the heartbeat timeout query and handler.
+8. Implement heartbeat timeout recurring handler (hardcoded 2-minute threshold).
+9. Wire handler registration into server setup (always registered, 1-minute interval).
+10. Tests for the heartbeat timeout query and handler.
 
 ### Phase 3: One-Shot Timer Infrastructure
-12. Add `scheduled_events` table (new SQLite migration).
-13. Add `ScheduledEventStore` interface and SQLite implementation.
-14. Add `ScheduledEvent` model to `pkg/store/models.go`.
-15. Implement one-shot timer loading, scheduling, firing, and cancellation.
-16. Add scheduled event cleanup to the purge recurring handler.
-17. Tests for one-shot timer lifecycle, expired timer handling, and cancellation.
+11. Add `scheduled_events` table (new SQLite migration).
+12. Add `ScheduledEventStore` interface and SQLite implementation.
+13. Add `ScheduledEvent` model to `pkg/store/models.go`.
+14. Implement one-shot timer loading, scheduling, firing, and cancellation.
+15. Add scheduled event cleanup to the purge recurring handler.
+16. Tests for one-shot timer lifecycle, expired timer handling, and cancellation.
 
 ### Phase 4: API and CLI (Deferred)
-18. Hub API endpoints for creating and cancelling scheduled events.
-19. CLI commands for scheduling messages.
-20. Integration tests.
+17. Hub API endpoints for creating and cancelling scheduled events.
+18. CLI commands for scheduling messages.
+19. Integration tests.
 
 ---
 
@@ -873,9 +874,7 @@ When the Hub moves to a multi-node deployment, the scheduler will need leader el
 | `pkg/store/models.go` | Add `AgentStatusUndetermined`, `ScheduledEvent` model, status constants |
 | `pkg/store/store.go` | Add `MarkStaleAgentsUndetermined` to `AgentStore`, add `ScheduledEventStore` interface |
 | `pkg/store/sqlite/sqlite.go` | New migration (scheduled_events table), implement new store methods |
-| `pkg/hub/handlers.go` | Add heartbeat timeout handler function |
-| `pkg/config/hub_config.go` | Add `HeartbeatTimeout` to `HubServerConfig` |
-| `pkg/config/settings_v1.go` | Add `HeartbeatTimeout` to `V1ServerHubConfig` |
+| `pkg/hub/handlers.go` | Add heartbeat timeout handler and purge handler functions |
 
 ---
 
