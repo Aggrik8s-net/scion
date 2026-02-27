@@ -321,8 +321,9 @@ export class ScionPageBrokerDetail extends LitElement {
       margin-top: 0.25rem;
     }
 
-    .agent-meta-label {
-      color: var(--scion-text-muted, #64748b);
+    .agent-meta sl-icon {
+      font-size: 0.875rem;
+      vertical-align: -0.125em;
       opacity: 0.7;
     }
 
@@ -730,7 +731,7 @@ export class ScionPageBrokerDetail extends LitElement {
               ${agent.name}
             </h3>
             <div class="agent-meta">
-              <span class="agent-meta-label">template:</span> ${agent.template}
+              <sl-icon name="code-square"></sl-icon> ${agent.template}
             </div>
           </div>
           <scion-status-badge
