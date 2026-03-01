@@ -266,8 +266,9 @@ type ScionConfig struct {
 	Resources   *ResourceSpec     `json:"resources,omitempty" yaml:"resources,omitempty"`
 	Image       string            `json:"image,omitempty" yaml:"image,omitempty"`
 	Services    []ServiceSpec     `json:"services,omitempty" yaml:"services,omitempty"`
-	MaxTurns    int               `json:"max_turns,omitempty" yaml:"max_turns,omitempty"`
-	MaxDuration string            `json:"max_duration,omitempty" yaml:"max_duration,omitempty"`
+	MaxTurns      int               `json:"max_turns,omitempty" yaml:"max_turns,omitempty"`
+	MaxModelCalls int               `json:"max_model_calls,omitempty" yaml:"max_model_calls,omitempty"`
+	MaxDuration   string            `json:"max_duration,omitempty" yaml:"max_duration,omitempty"`
 	Hub         *AgentHubConfig      `json:"hub,omitempty" yaml:"hub,omitempty"`
 	Telemetry   *TelemetryConfig     `json:"telemetry,omitempty" yaml:"telemetry,omitempty"`
 

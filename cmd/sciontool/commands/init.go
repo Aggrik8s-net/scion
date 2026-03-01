@@ -11,10 +11,12 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -329,8 +331,61 @@ func runInit(args []string) int {
 		}
 	}
 
-	// Wait for child to exit
-	result := <-exitChan
+	// Set up SIGUSR1 handler for limits-exceeded signaling from hook processes.
+	// When a hook handler detects a limit is exceeded, it sends SIGUSR1 to PID 1.
+	usr1Chan := make(chan os.Signal, 1)
+	signal.Notify(usr1Chan, syscall.SIGUSR1)
+	defer signal.Stop(usr1Chan)
+
+	// Set up duration timer if max_duration is configured
+	var durationTimer <-chan time.Time
+	maxDurStr := os.Getenv("SCION_MAX_DURATION")
+	if maxDurStr != "" {
+		maxDur := api.ParseDuration(maxDurStr)
+		if maxDur > 0 {
+			t := time.NewTimer(maxDur)
+			defer t.Stop()
+			durationTimer = t.C
+			log.Info("Duration limit set: %s", maxDur)
+		}
+	}
+
+	// Initialize agent-limits.json for turn and model call tracking
+	maxTurns := handlers.ParseEnvInt("SCION_MAX_TURNS")
+	maxModelCalls := handlers.ParseEnvInt("SCION_MAX_MODEL_CALLS")
+	if maxTurns > 0 || maxModelCalls > 0 {
+		limitsPath := filepath.Join(agentHome, "agent-limits.json")
+		if err := handlers.InitLimitsFile(limitsPath, maxTurns, maxModelCalls); err != nil {
+			log.Error("Failed to initialize agent-limits.json: %v", err)
+		} else {
+			log.Info("Limits initialized: max_turns=%d, max_model_calls=%d", maxTurns, maxModelCalls)
+		}
+	}
+
+	// Wait for child to exit, duration limit, or SIGUSR1 (limits exceeded from hook)
+	var result struct {
+		code int
+		err  error
+	}
+	limitsExceeded := false
+
+	select {
+	case r := <-exitChan:
+		result = r
+	case <-durationTimer:
+		limitsExceeded = true
+		handleLimitsExceeded(sup, "duration", fmt.Sprintf("max_duration of %s exceeded", maxDurStr))
+		result = <-exitChan
+	case <-usr1Chan:
+		// SIGUSR1 received from hook handler - limits already set in agent-info.json
+		limitsExceeded = true
+		log.TaggedInfo("LIMITS_EXCEEDED", "Received SIGUSR1: limit exceeded, initiating shutdown")
+		// Initiate graceful shutdown of the child process
+		if err := sup.Signal(syscall.SIGTERM); err != nil {
+			log.Error("Failed to send SIGTERM to child: %v", err)
+		}
+		result = <-exitChan
+	}
 
 	// Stop heartbeat before reporting shutdown status to prevent races
 	if heartbeatCancel != nil {
@@ -375,6 +430,11 @@ func runInit(args []string) int {
 		hubCancel()
 	}
 
+	if limitsExceeded {
+		log.Info("Exiting with code %d (limits exceeded)", handlers.ExitCodeLimitsExceeded)
+		return handlers.ExitCodeLimitsExceeded
+	}
+
 	if result.err != nil {
 		log.Error("Supervisor error: %v", result.err)
 		return 1
@@ -382,6 +442,33 @@ func runInit(args []string) int {
 
 	log.Info("Child exited with code %d", result.code)
 	return result.code
+}
+
+// handleLimitsExceeded is called when a limit is exceeded (duration timer or SIGUSR1).
+// It updates the agent status, logs the event, reports to the Hub, and sends SIGTERM
+// to the child process to initiate graceful shutdown.
+func handleLimitsExceeded(sup *supervisor.Supervisor, limitType, message string) {
+	// 1. Update agent-info.json to LIMITS_EXCEEDED (sticky)
+	statusHandler := handlers.NewStatusHandler()
+	if err := statusHandler.UpdateActivity(state.ActivityLimitsExceeded, ""); err != nil {
+		log.Error("Failed to set limits_exceeded status: %v", err)
+	}
+
+	// 2. Log the event
+	log.TaggedInfo("LIMITS_EXCEEDED", "Agent stopped: %s", message)
+
+	// 3. Report to Hub if configured
+	hubHandler := handlers.NewHubHandler()
+	if hubHandler != nil {
+		if err := hubHandler.ReportLimitsExceeded(message); err != nil {
+			log.Error("Failed to report limits_exceeded to Hub: %v", err)
+		}
+	}
+
+	// 4. Send SIGTERM to child process
+	if err := sup.Signal(syscall.SIGTERM); err != nil {
+		log.Error("Failed to send SIGTERM to child: %v", err)
+	}
 }
 
 // extractChildCommand extracts the command arguments.

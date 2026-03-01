@@ -17,14 +17,12 @@ package agent
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/user"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/apiclient"
@@ -313,6 +311,9 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 		if finalScionCfg.MaxTurns > 0 {
 			opts.Env["SCION_MAX_TURNS"] = strconv.Itoa(finalScionCfg.MaxTurns)
 		}
+		if finalScionCfg.MaxModelCalls > 0 {
+			opts.Env["SCION_MAX_MODEL_CALLS"] = strconv.Itoa(finalScionCfg.MaxModelCalls)
+		}
 		if finalScionCfg.MaxDuration != "" {
 			opts.Env["SCION_MAX_DURATION"] = finalScionCfg.MaxDuration
 		}
@@ -496,13 +497,6 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 		return nil, fmt.Errorf("failed to launch container: %w", err)
 	}
 
-	// Start duration timer if configured
-	if finalScionCfg != nil {
-		if maxDur := finalScionCfg.ParseMaxDuration(); maxDur > 0 {
-			startDurationTimer(m.Runtime, id, maxDur)
-		}
-	}
-
 	status := "running"
 	if opts.Resume {
 		status = "resumed"
@@ -597,21 +591,3 @@ func buildAgentEnv(scionCfg *api.ScionConfig, extraEnv map[string]string) ([]str
 	return agentEnv, warnings, missingKeys
 }
 
-// startDurationTimer spawns a goroutine that stops the container after the given duration.
-// No-op if duration <= 0.
-func startDurationTimer(rt runtime.Runtime, containerID string, duration time.Duration) {
-	if duration <= 0 {
-		return
-	}
-	go func() {
-		timer := time.NewTimer(duration)
-		defer timer.Stop()
-		<-timer.C
-		slog.Info("Max duration reached, stopping agent", "containerID", containerID, "duration", duration)
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := rt.Stop(ctx, containerID); err != nil {
-			slog.Error("Failed to stop agent after max duration", "containerID", containerID, "error", err)
-		}
-	}()
-}

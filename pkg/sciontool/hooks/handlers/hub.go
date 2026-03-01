@@ -241,6 +241,24 @@ func (h *HubHandler) ReportTaskCompleted(taskSummary string) error {
 	})
 }
 
+// ReportLimitsExceeded sends a limits-exceeded status to the Hub.
+func (h *HubHandler) ReportLimitsExceeded(message string) error {
+	if h == nil || h.client == nil {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	log.Debug("Hub: Reporting limits_exceeded: %s", truncateMessage(message, 50))
+	as := state.AgentState{Phase: state.PhaseRunning, Activity: state.ActivityLimitsExceeded}
+	return h.client.UpdateStatus(ctx, hub.StatusUpdate{
+		Activity: state.ActivityLimitsExceeded,
+		Status:   as.DisplayStatus(),
+		Message:  message,
+	})
+}
+
 // truncateMessage truncates a message to the specified length.
 func truncateMessage(msg string, maxLen int) string {
 	if len(msg) <= maxLen {

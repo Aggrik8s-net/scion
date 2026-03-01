@@ -21,9 +21,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/config"
@@ -450,67 +448,6 @@ func TestStartResumeNonExistentAgent(t *testing.T) {
 	if !strings.Contains(err.Error(), "does not exist") {
 		t.Errorf("expected error message to contain 'does not exist', got: %v", err)
 	}
-}
-
-func TestStartDurationTimer(t *testing.T) {
-	t.Run("stops container after duration", func(t *testing.T) {
-		var mu sync.Mutex
-		var stoppedID string
-
-		mockRT := &runtime.MockRuntime{
-			StopFunc: func(ctx context.Context, id string) error {
-				mu.Lock()
-				defer mu.Unlock()
-				stoppedID = id
-				return nil
-			},
-		}
-
-		startDurationTimer(mockRT, "test-container", 50*time.Millisecond)
-
-		// Wait for the timer to fire
-		time.Sleep(150 * time.Millisecond)
-
-		mu.Lock()
-		defer mu.Unlock()
-		if stoppedID != "test-container" {
-			t.Errorf("expected Stop to be called with 'test-container', got %q", stoppedID)
-		}
-	})
-
-	t.Run("no-op for zero duration", func(t *testing.T) {
-		stopCalled := false
-		mockRT := &runtime.MockRuntime{
-			StopFunc: func(ctx context.Context, id string) error {
-				stopCalled = true
-				return nil
-			},
-		}
-
-		startDurationTimer(mockRT, "test-container", 0)
-
-		time.Sleep(50 * time.Millisecond)
-		if stopCalled {
-			t.Error("Stop should not be called for zero duration")
-		}
-	})
-
-	t.Run("no-op for negative duration", func(t *testing.T) {
-		stopCalled := false
-		mockRT := &runtime.MockRuntime{
-			StopFunc: func(ctx context.Context, id string) error {
-				stopCalled = true
-				return nil
-			},
-		}
-
-		startDurationTimer(mockRT, "test-container", -1*time.Second)
-
-		time.Sleep(50 * time.Millisecond)
-		if stopCalled {
-			t.Error("Stop should not be called for negative duration")
-		}
-	})
 }
 
 func TestStartResolvesHarnessConfigUser(t *testing.T) {

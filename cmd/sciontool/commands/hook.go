@@ -181,6 +181,7 @@ func processHookData(data []byte) error {
 	loggingHandler := handlers.NewLoggingHandler()
 	promptHandler := handlers.NewPromptHandler()
 	hubHandler := handlers.NewHubHandler()
+	limitsHandler := handlers.NewLimitsHandler()
 
 	processor.AddHandler(statusHandler.Handle)
 	processor.AddHandler(loggingHandler.Handle)
@@ -189,6 +190,11 @@ func processHookData(data []byte) error {
 	// Add Hub handler if configured
 	if hubHandler != nil {
 		processor.AddHandler(hubHandler.Handle)
+	}
+
+	// Add limits handler if any limits are configured
+	if limitsHandler != nil {
+		processor.AddHandler(limitsHandler.Handle)
 	}
 
 	// Add telemetry handler if telemetry is enabled

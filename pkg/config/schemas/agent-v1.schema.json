@@ -39,6 +39,12 @@
       "description": "Maximum number of LLM turns before the agent is stopped.",
       "x-since": "1"
     },
+    "max_model_calls": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Maximum number of LLM model API calls before the agent is stopped.",
+      "x-since": "1"
+    },
     "max_duration": {
       "type": "string",
       "pattern": "^[0-9]+(s|m|h)$",
