@@ -2619,6 +2619,7 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 		Labels:          req.Labels,
 		Visibility:      store.VisibilityPrivate,
 		CreatedBy:       createdBy,
+		OwnerID:         createdBy,
 	}
 
 	// Store human-friendly slug instead of UUID for display

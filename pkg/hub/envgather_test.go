@@ -1237,3 +1237,173 @@ func TestEnvGather_HubHandler_RetryAfterCancel_GroveRoute(t *testing.T) {
 		t.Errorf("expected stale agent to be deleted, got err=%v", err)
 	}
 }
+
+// TestGroveRoute_ResolvesUserScopedEnvVars verifies that agents created via
+// the grove-scoped route (/api/v1/groves/{groveId}/agents) properly resolve
+// user-scoped env vars. This is a regression test for a bug where
+// createGroveAgent did not set OwnerID on the agent, causing user-scoped
+// env vars and secrets to be silently skipped during dispatch.
+func TestGroveRoute_ResolvesUserScopedEnvVars(t *testing.T) {
+	srv, st := testServer(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{ID: "grove-owner-env", Name: "owner-env-grove", Slug: "owner-env-grove"}
+	if err := st.CreateGrove(ctx, grove); err != nil {
+		t.Fatal(err)
+	}
+
+	broker := &store.RuntimeBroker{
+		ID: "broker-owner-env", Name: "owner-env-broker", Slug: "owner-env-broker",
+		Endpoint: "http://localhost:9800", Status: store.BrokerStatusOnline,
+	}
+	if err := st.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.AddGroveProvider(ctx, &store.GroveProvider{
+		GroveID: "grove-owner-env", BrokerID: "broker-owner-env",
+		LocalPath: "/tmp/test-grove",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Store a user-scoped env var for the dev-user (dev auth identity)
+	if err := st.CreateEnvVar(ctx, &store.EnvVar{
+		ID:      "env-owner-1",
+		Key:     "GEMINI_API_KEY",
+		Value:   "user-scoped-gemini-key",
+		Scope:   "user",
+		ScopeID: "dev-user",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mock broker that captures the dispatch request
+	mockClient := &envGatherMockBrokerClient{}
+	dispatcher := NewHTTPAgentDispatcherWithClient(st, mockClient, true)
+	srv.SetDispatcher(dispatcher)
+
+	// Create agent via grove-scoped route (simulates the sync flow)
+	reqBody := map[string]interface{}{
+		"name":     "owner-env-agent",
+		"template": "claude",
+	}
+
+	rec := doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/v1/groves/%s/agents", grove.ID), reqBody)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Verify the mock broker received the user-scoped env var
+	if mockClient.lastCreateReq == nil {
+		t.Fatal("expected dispatch request to be captured")
+	}
+	if val, ok := mockClient.lastCreateReq.ResolvedEnv["GEMINI_API_KEY"]; !ok {
+		t.Error("expected GEMINI_API_KEY in ResolvedEnv — user-scoped env var was not resolved (OwnerID not set?)")
+	} else if val != "user-scoped-gemini-key" {
+		t.Errorf("expected GEMINI_API_KEY=%q, got %q", "user-scoped-gemini-key", val)
+	}
+
+	// Also verify the agent record has OwnerID set
+	var resp CreateAgentResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal("failed to decode response:", err)
+	}
+	if resp.Agent == nil {
+		t.Fatal("expected agent in response")
+	}
+
+	agent, err := st.GetAgent(ctx, resp.Agent.ID)
+	if err != nil {
+		t.Fatalf("failed to get agent: %v", err)
+	}
+	if agent.OwnerID == "" {
+		t.Error("expected OwnerID to be set on agent created via grove route")
+	}
+	if agent.OwnerID != "dev-user" {
+		t.Errorf("expected OwnerID=%q, got %q", "dev-user", agent.OwnerID)
+	}
+}
+
+// TestGroveRoute_ResolvesUserScopedSecrets verifies that agents created via
+// the grove-scoped route properly resolve user-scoped secrets. This is the
+// counterpart to TestGroveRoute_ResolvesUserScopedEnvVars for the secret backend.
+func TestGroveRoute_ResolvesUserScopedSecrets(t *testing.T) {
+	srv, st := testServer(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{ID: "grove-owner-secret", Name: "owner-secret-grove", Slug: "owner-secret-grove"}
+	if err := st.CreateGrove(ctx, grove); err != nil {
+		t.Fatal(err)
+	}
+
+	broker := &store.RuntimeBroker{
+		ID: "broker-owner-secret", Name: "owner-secret-broker", Slug: "owner-secret-broker",
+		Endpoint: "http://localhost:9800", Status: store.BrokerStatusOnline,
+	}
+	if err := st.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.AddGroveProvider(ctx, &store.GroveProvider{
+		GroveID: "grove-owner-secret", BrokerID: "broker-owner-secret",
+		LocalPath: "/tmp/test-grove",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Store a user-scoped secret for the dev-user
+	backend := secret.NewLocalBackend(st)
+	_, _, err := backend.Set(ctx, &secret.SetSecretInput{
+		Name:       "GEMINI_API_KEY",
+		Value:      "secret-gemini-key",
+		SecretType: secret.TypeEnvironment,
+		Scope:      secret.ScopeUser,
+		ScopeID:    "dev-user",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Mock broker that captures the dispatch request
+	mockClient := &envGatherMockBrokerClient{}
+	dispatcher := NewHTTPAgentDispatcherWithClient(st, mockClient, true)
+	dispatcher.SetSecretBackend(backend)
+	srv.SetDispatcher(dispatcher)
+
+	// Create agent via grove-scoped route
+	reqBody := map[string]interface{}{
+		"name":     "owner-secret-agent",
+		"template": "claude",
+	}
+
+	rec := doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/v1/groves/%s/agents", grove.ID), reqBody)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Verify the mock broker received the user-scoped secret
+	if mockClient.lastCreateReq == nil {
+		t.Fatal("expected dispatch request to be captured")
+	}
+
+	found := false
+	for _, rs := range mockClient.lastCreateReq.ResolvedSecrets {
+		if rs.Name == "GEMINI_API_KEY" {
+			found = true
+			if rs.Value != "secret-gemini-key" {
+				t.Errorf("expected secret value %q, got %q", "secret-gemini-key", rs.Value)
+			}
+			if rs.Source != "user" {
+				t.Errorf("expected source %q, got %q", "user", rs.Source)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected GEMINI_API_KEY in ResolvedSecrets — user-scoped secret was not resolved (OwnerID not set?)")
+	}
+}
