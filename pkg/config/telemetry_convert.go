@@ -41,6 +41,7 @@ func ConvertV1TelemetryToAPI(v1 *V1TelemetryConfig) *api.TelemetryConfig {
 			Endpoint: v1.Cloud.Endpoint,
 			Protocol: v1.Cloud.Protocol,
 			Headers:  v1.Cloud.Headers,
+			Provider: v1.Cloud.Provider,
 		}
 		if v1.Cloud.TLS != nil {
 			result.Cloud.TLS = &api.TelemetryTLS{
@@ -140,6 +141,9 @@ func TelemetryConfigToEnv(cfg *api.TelemetryConfig) map[string]string {
 			if cfg.Cloud.Batch.Timeout != "" {
 				env["SCION_TELEMETRY_CLOUD_BATCH_TIMEOUT"] = cfg.Cloud.Batch.Timeout
 			}
+		}
+		if cfg.Cloud.Provider != "" {
+			env["SCION_TELEMETRY_CLOUD_PROVIDER"] = cfg.Cloud.Provider
 		}
 	}
 

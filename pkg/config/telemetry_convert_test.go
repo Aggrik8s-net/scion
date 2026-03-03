@@ -56,6 +56,7 @@ func TestConvertV1TelemetryToAPI_Full(t *testing.T) {
 				MaxSize: 512,
 				Timeout: "5s",
 			},
+			Provider: "gcp",
 		},
 		Hub: &V1TelemetryHubConfig{
 			Enabled:        &hubEnabled,
@@ -118,6 +119,9 @@ func TestConvertV1TelemetryToAPI_Full(t *testing.T) {
 	}
 	if result.Cloud.Batch.Timeout != "5s" {
 		t.Errorf("Cloud.Batch.Timeout = %q, want %q", result.Cloud.Batch.Timeout, "5s")
+	}
+	if result.Cloud.Provider != "gcp" {
+		t.Errorf("Cloud.Provider = %q, want %q", result.Cloud.Provider, "gcp")
 	}
 
 	// Hub
@@ -227,6 +231,7 @@ func TestTelemetryConfigToEnv_Full(t *testing.T) {
 				MaxSize: 256,
 				Timeout: "10s",
 			},
+			Provider: "gcp",
 		},
 		Hub: &api.TelemetryHubConfig{
 			Enabled:        &hubEnabled,
@@ -264,6 +269,7 @@ func TestTelemetryConfigToEnv_Full(t *testing.T) {
 		"SCION_OTEL_INSECURE":                      "false",
 		"SCION_TELEMETRY_CLOUD_BATCH_MAX_SIZE":     "256",
 		"SCION_TELEMETRY_CLOUD_BATCH_TIMEOUT":      "10s",
+		"SCION_TELEMETRY_CLOUD_PROVIDER":           "gcp",
 		"SCION_TELEMETRY_HUB_ENABLED":              "true",
 		"SCION_TELEMETRY_HUB_REPORT_INTERVAL":      "60s",
 		"SCION_TELEMETRY_LOCAL_ENABLED":            "true",
@@ -343,6 +349,22 @@ func TestTelemetryConfigToEnv_OnlyNonZero(t *testing.T) {
 	env = TelemetryConfigToEnv(cfg)
 	if env != nil {
 		t.Errorf("expected nil for cloud with all zero values, got %v", env)
+	}
+}
+
+func TestTelemetryConfigToEnv_ProviderNotEmittedWhenEmpty(t *testing.T) {
+	cloudEnabled := true
+	cfg := &api.TelemetryConfig{
+		Cloud: &api.TelemetryCloudConfig{
+			Enabled:  &cloudEnabled,
+			Endpoint: "otel.example.com:4317",
+			Provider: "", // empty provider
+		},
+	}
+
+	env := TelemetryConfigToEnv(cfg)
+	if _, ok := env["SCION_TELEMETRY_CLOUD_PROVIDER"]; ok {
+		t.Error("SCION_TELEMETRY_CLOUD_PROVIDER should not be set when Provider is empty")
 	}
 }
 

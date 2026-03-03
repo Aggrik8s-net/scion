@@ -197,6 +197,7 @@ type TelemetryCloudConfig struct {
 	Headers  map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
 	TLS      *TelemetryTLS     `json:"tls,omitempty" yaml:"tls,omitempty"`
 	Batch    *TelemetryBatch   `json:"batch,omitempty" yaml:"batch,omitempty"`
+	Provider string            `json:"provider,omitempty" yaml:"provider,omitempty"`
 }
 
 // TelemetryTLS holds TLS settings for OTLP export.

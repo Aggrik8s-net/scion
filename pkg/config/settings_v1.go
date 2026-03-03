@@ -304,6 +304,7 @@ type V1TelemetryCloudConfig struct {
 	Headers  map[string]string      `json:"headers,omitempty" yaml:"headers,omitempty" koanf:"headers"`
 	TLS      *V1TelemetryTLSConfig  `json:"tls,omitempty" yaml:"tls,omitempty" koanf:"tls"`
 	Batch    *V1TelemetryBatchConfig `json:"batch,omitempty" yaml:"batch,omitempty" koanf:"batch"`
+	Provider string                 `json:"provider,omitempty" yaml:"provider,omitempty" koanf:"provider"`
 }
 
 // V1TelemetryTLSConfig holds TLS settings for cloud OTLP export.
