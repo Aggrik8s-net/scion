@@ -52,9 +52,10 @@ interface ScheduledEvent {
 }
 
 interface SchedulerResponse {
-  scheduler: SchedulerInfo;
-  scheduledEvents: ScheduledEvent[] | null;
-  serverTime: string;
+  status?: string;
+  scheduler?: SchedulerInfo;
+  scheduledEvents?: ScheduledEvent[] | null;
+  serverTime?: string;
 }
 
 @customElement('scion-page-admin-scheduler')
@@ -462,11 +463,25 @@ export class ScionPageAdminScheduler extends LitElement {
     if (!this.data) return nothing;
 
     const { scheduler, scheduledEvents } = this.data;
+
+    if (!scheduler) {
+      return html`
+        <div class="section">
+          <h2 class="section-title">Scheduler Not Available</h2>
+          <p class="section-description">
+            The scheduler has not been initialized on this server.
+          </p>
+        </div>
+      `;
+    }
+
     const events = scheduledEvents ?? [];
 
     return html`
-      ${this.renderOverview(scheduler)} ${this.renderRecurringHandlers(scheduler.recurringHandlers)}
-      ${this.renderEventHandlers(scheduler.eventHandlers)} ${this.renderScheduledEvents(events)}
+      ${this.renderOverview(scheduler)}
+      ${this.renderRecurringHandlers(scheduler.recurringHandlers)}
+      ${this.renderEventHandlers(scheduler.eventHandlers)}
+      ${this.renderScheduledEvents(events)}
     `;
   }
 

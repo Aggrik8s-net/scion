@@ -685,7 +685,10 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			}()
 		} else {
 			// Combined mode: Hub API is mounted on the Web server.
-			// Only need to clean up Hub resources on shutdown.
+			// Start background services (scheduler, notifications) that
+			// normally start inside hubSrv.Start(). In combined mode
+			// Start() is not called since the Web server owns the listener.
+			hubSrv.StartBackgroundServices(ctx)
 			log.Printf("Hub API will be mounted on Web server (port %d)", webPort)
 			wg.Add(1)
 			go func() {

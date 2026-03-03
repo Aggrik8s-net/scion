@@ -976,17 +976,14 @@ func (s *Server) messageEventHandler() EventHandler {
 	}
 }
 
-func (s *Server) Start(ctx context.Context) error {
+// StartBackgroundServices initializes and starts the scheduler and notification
+// dispatcher. It is called by Start() for standalone mode and must be called
+// explicitly in combined mode (Hub mounted on WebServer) since Start() is
+// not invoked in that case.
+func (s *Server) StartBackgroundServices(ctx context.Context) {
 	s.mu.Lock()
-	s.startTime = time.Now()
-
-	handler := s.applyMiddleware(s.mux)
-
-	s.httpServer = &http.Server{
-		Addr:         fmt.Sprintf("%s:%d", s.config.Host, s.config.Port),
-		Handler:      handler,
-		ReadTimeout:  s.config.ReadTimeout,
-		WriteTimeout: s.config.WriteTimeout,
+	if s.startTime.IsZero() {
+		s.startTime = time.Now()
 	}
 	s.mu.Unlock()
 
@@ -1004,6 +1001,23 @@ func (s *Server) Start(ctx context.Context) error {
 	// The dispatcher is resolved lazily so it works even if SetDispatcher
 	// is called after Start().
 	s.StartNotificationDispatcher()
+}
+
+func (s *Server) Start(ctx context.Context) error {
+	s.mu.Lock()
+	s.startTime = time.Now()
+
+	handler := s.applyMiddleware(s.mux)
+
+	s.httpServer = &http.Server{
+		Addr:         fmt.Sprintf("%s:%d", s.config.Host, s.config.Port),
+		Handler:      handler,
+		ReadTimeout:  s.config.ReadTimeout,
+		WriteTimeout: s.config.WriteTimeout,
+	}
+	s.mu.Unlock()
+
+	s.StartBackgroundServices(ctx)
 
 	slog.Info("Hub API server starting", "host", s.config.Host, "port", s.config.Port)
 

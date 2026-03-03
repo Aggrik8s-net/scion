@@ -42,6 +42,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/agents': 'Agents',
   '/brokers': 'Brokers',
   '/settings': 'Settings',
+  '/admin/scheduler': 'Scheduler',
   '/admin/users': 'Users',
   '/admin/groups': 'Groups',
 };
