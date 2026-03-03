@@ -366,7 +366,10 @@ export class ScionPageTerminal extends LitElement {
       }
 
       // Ctrl/Cmd+V: paste from clipboard
+      // preventDefault() stops the browser from also firing a native paste
+      // event, which xterm would pick up separately — causing a double-paste.
       if (event.type === 'keydown' && event.key === 'v' && isMod && !event.shiftKey) {
+        event.preventDefault();
         void navigator.clipboard.readText().then((text) => {
           if (text) this.sendData(text);
         });
@@ -383,6 +386,7 @@ export class ScionPageTerminal extends LitElement {
 
       // Ctrl+Shift+V: always paste
       if (event.type === 'keydown' && event.key === 'V' && event.ctrlKey && event.shiftKey) {
+        event.preventDefault();
         void navigator.clipboard.readText().then((text) => {
           if (text) this.sendData(text);
         });
