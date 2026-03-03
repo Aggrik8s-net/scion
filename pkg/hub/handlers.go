@@ -2658,6 +2658,11 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 		return
 	}
 
+	// Create notification subscription if requested
+	if req.Notify {
+		s.createNotifySubscription(ctx, agent.ID, groveID, notifySubscriberType, notifySubscriberID, createdBy)
+	}
+
 	// Dispatch to runtime broker if available.
 	// Unless provision-only is requested, do a full create+start via DispatchAgentCreate.
 	// Otherwise provision only — set up dirs, worktree, templates without launching the container.

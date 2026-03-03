@@ -233,3 +233,92 @@ func TestHandleNotifications_EmptyList(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&notifs))
 	assert.Empty(t, notifs)
 }
+
+// setupGroveWithBroker creates a grove with a registered runtime broker for
+// agent creation tests.
+func setupGroveWithBroker(t *testing.T, s store.Store, groveID, groveName string) *store.Grove {
+	t.Helper()
+	ctx := context.Background()
+
+	broker := &store.RuntimeBroker{
+		ID:     "broker-" + groveID,
+		Name:   "Test Broker",
+		Slug:   "test-broker-" + groveID,
+		Status: store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.CreateRuntimeBroker(ctx, broker))
+
+	grove := &store.Grove{
+		ID:   groveID,
+		Name: groveName,
+		Slug: groveID,
+	}
+	require.NoError(t, s.CreateGrove(ctx, grove))
+
+	provider := &store.GroveProvider{
+		GroveID:    grove.ID,
+		BrokerID:   broker.ID,
+		BrokerName: broker.Name,
+		Status:     store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.AddGroveProvider(ctx, provider))
+
+	return grove
+}
+
+func TestCreateGroveAgent_NotifyCreatesSubscription(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	grove := setupGroveWithBroker(t, s, "grove-notify-test", "Notify Test Grove")
+
+	// Create an agent via the grove-scoped endpoint with notify=true
+	req := CreateAgentRequest{
+		Name:   "notify-agent",
+		Notify: true,
+	}
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/groves/"+grove.ID+"/agents", req)
+
+	// Accept 201 (created) or 202 (env-gather) — either should create the subscription
+	assert.True(t, rec.Code == http.StatusCreated || rec.Code == http.StatusAccepted,
+		"expected 201 or 202, got %d: %s", rec.Code, rec.Body.String())
+
+	var resp CreateAgentResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.NotNil(t, resp.Agent)
+
+	// Verify a notification subscription was created for the user
+	subs, err := s.GetNotificationSubscriptions(ctx, resp.Agent.ID)
+	require.NoError(t, err)
+	require.Len(t, subs, 1, "expected exactly 1 notification subscription for the agent")
+	assert.Equal(t, store.SubscriberTypeUser, subs[0].SubscriberType)
+	assert.Equal(t, "dev-user", subs[0].SubscriberID)
+	assert.Equal(t, grove.ID, subs[0].GroveID)
+	assert.Contains(t, subs[0].TriggerActivities, "COMPLETED")
+	assert.Contains(t, subs[0].TriggerActivities, "WAITING_FOR_INPUT")
+	assert.Contains(t, subs[0].TriggerActivities, "LIMITS_EXCEEDED")
+}
+
+func TestCreateGroveAgent_NoNotifyNoSubscription(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	grove := setupGroveWithBroker(t, s, "grove-no-notify-test", "No Notify Test Grove")
+
+	// Create an agent without notify
+	req := CreateAgentRequest{
+		Name: "no-notify-agent",
+	}
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/groves/"+grove.ID+"/agents", req)
+	assert.True(t, rec.Code == http.StatusCreated || rec.Code == http.StatusAccepted,
+		"expected 201 or 202, got %d: %s", rec.Code, rec.Body.String())
+
+	var resp CreateAgentResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.NotNil(t, resp.Agent)
+
+	// Verify no subscription was created
+	subs, err := s.GetNotificationSubscriptions(ctx, resp.Agent.ID)
+	require.NoError(t, err)
+	assert.Empty(t, subs, "expected no notification subscriptions when notify is false")
+}
