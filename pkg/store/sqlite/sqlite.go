@@ -62,6 +62,11 @@ func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
+// DB returns the underlying *sql.DB for direct access in tests.
+func (s *SQLiteStore) DB() *sql.DB {
+	return s.db
+}
+
 // Ping checks database connectivity.
 func (s *SQLiteStore) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
@@ -93,6 +98,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		migrationV21,
 		migrationV22,
 		migrationV23,
+		migrationV24,
 	}
 
 	// Create migrations table if not exists
@@ -649,6 +655,13 @@ const migrationV23 = `
 ALTER TABLE secrets ADD COLUMN injection_mode TEXT NOT NULL DEFAULT 'as_needed';
 `
 
+// Migration V24: Add last_activity_event column to agents for stalled detection.
+// Backfills existing agents to prevent false positives on upgrade.
+const migrationV24 = `
+ALTER TABLE agents ADD COLUMN last_activity_event TIMESTAMP;
+UPDATE agents SET last_activity_event = COALESCE(last_seen, updated_at, created_at);
+`
+
 // Helper functions for JSON marshaling/unmarshaling
 func marshalJSON(v interface{}) string {
 	if v == nil {
@@ -704,9 +717,9 @@ func (s *SQLiteStore) CreateAgent(ctx context.Context, agent *store.Agent) error
 			connection_state, container_status, runtime_state,
 			image, detached, runtime, runtime_broker_id, web_pty_enabled, task_summary, message,
 			applied_config,
-			created_at, updated_at, last_seen, deleted_at,
+			created_at, updated_at, last_seen, last_activity_event, deleted_at,
 			created_by, owner_id, visibility, state_version
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		agent.ID, agent.Slug, agent.Name, agent.Template, agent.GroveID,
 		marshalJSON(agent.Labels), marshalJSON(agent.Annotations),
@@ -714,7 +727,7 @@ func (s *SQLiteStore) CreateAgent(ctx context.Context, agent *store.Agent) error
 		agent.ConnectionState, agent.ContainerStatus, agent.RuntimeState,
 		agent.Image, agent.Detached, agent.Runtime, nullableString(agent.RuntimeBrokerID), agent.WebPTYEnabled, agent.TaskSummary, agent.Message,
 		marshalJSON(agent.AppliedConfig),
-		agent.Created, agent.Updated, nullableTime(agent.LastSeen), nullableTime(agent.DeletedAt),
+		agent.Created, agent.Updated, nullableTime(agent.LastSeen), nullableTime(agent.LastActivityEvent), nullableTime(agent.DeletedAt),
 		agent.CreatedBy, agent.OwnerID, agent.Visibility, agent.StateVersion,
 	)
 	if err != nil {
@@ -729,7 +742,7 @@ func (s *SQLiteStore) CreateAgent(ctx context.Context, agent *store.Agent) error
 func (s *SQLiteStore) GetAgent(ctx context.Context, id string) (*store.Agent, error) {
 	agent := &store.Agent{}
 	var labels, annotations, appliedConfig string
-	var lastSeen, deletedAt sql.NullTime
+	var lastSeen, lastActivityEvent, deletedAt sql.NullTime
 	var runtimeBrokerID, message, toolName sql.NullString
 
 	err := s.db.QueryRowContext(ctx, `
@@ -739,7 +752,7 @@ func (s *SQLiteStore) GetAgent(ctx context.Context, id string) (*store.Agent, er
 			connection_state, container_status, runtime_state,
 			image, detached, runtime, runtime_broker_id, web_pty_enabled, task_summary, message,
 			applied_config,
-			created_at, updated_at, last_seen, deleted_at,
+			created_at, updated_at, last_seen, last_activity_event, deleted_at,
 			created_by, owner_id, visibility, state_version
 		FROM agents WHERE id = ?
 	`, id).Scan(
@@ -749,7 +762,7 @@ func (s *SQLiteStore) GetAgent(ctx context.Context, id string) (*store.Agent, er
 		&agent.ConnectionState, &agent.ContainerStatus, &agent.RuntimeState,
 		&agent.Image, &agent.Detached, &agent.Runtime, &runtimeBrokerID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
 		&appliedConfig,
-		&agent.Created, &agent.Updated, &lastSeen, &deletedAt,
+		&agent.Created, &agent.Updated, &lastSeen, &lastActivityEvent, &deletedAt,
 		&agent.CreatedBy, &agent.OwnerID, &agent.Visibility, &agent.StateVersion,
 	)
 	if err != nil {
@@ -764,6 +777,9 @@ func (s *SQLiteStore) GetAgent(ctx context.Context, id string) (*store.Agent, er
 	unmarshalJSON(appliedConfig, &agent.AppliedConfig)
 	if lastSeen.Valid {
 		agent.LastSeen = lastSeen.Time
+	}
+	if lastActivityEvent.Valid {
+		agent.LastActivityEvent = lastActivityEvent.Time
 	}
 	if deletedAt.Valid {
 		agent.DeletedAt = deletedAt.Time
@@ -784,7 +800,7 @@ func (s *SQLiteStore) GetAgent(ctx context.Context, id string) (*store.Agent, er
 func (s *SQLiteStore) GetAgentBySlug(ctx context.Context, groveID, slug string) (*store.Agent, error) {
 	agent := &store.Agent{}
 	var labels, annotations, appliedConfig string
-	var lastSeen, deletedAt sql.NullTime
+	var lastSeen, lastActivityEvent, deletedAt sql.NullTime
 	var runtimeBrokerID, message, toolName sql.NullString
 
 	err := s.db.QueryRowContext(ctx, `
@@ -794,7 +810,7 @@ func (s *SQLiteStore) GetAgentBySlug(ctx context.Context, groveID, slug string) 
 			connection_state, container_status, runtime_state,
 			image, detached, runtime, runtime_broker_id, web_pty_enabled, task_summary, message,
 			applied_config,
-			created_at, updated_at, last_seen, deleted_at,
+			created_at, updated_at, last_seen, last_activity_event, deleted_at,
 			created_by, owner_id, visibility, state_version
 		FROM agents WHERE grove_id = ? AND agent_id = ?
 	`, groveID, slug).Scan(
@@ -804,7 +820,7 @@ func (s *SQLiteStore) GetAgentBySlug(ctx context.Context, groveID, slug string) 
 		&agent.ConnectionState, &agent.ContainerStatus, &agent.RuntimeState,
 		&agent.Image, &agent.Detached, &agent.Runtime, &runtimeBrokerID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
 		&appliedConfig,
-		&agent.Created, &agent.Updated, &lastSeen, &deletedAt,
+		&agent.Created, &agent.Updated, &lastSeen, &lastActivityEvent, &deletedAt,
 		&agent.CreatedBy, &agent.OwnerID, &agent.Visibility, &agent.StateVersion,
 	)
 	if err != nil {
@@ -819,6 +835,9 @@ func (s *SQLiteStore) GetAgentBySlug(ctx context.Context, groveID, slug string) 
 	unmarshalJSON(appliedConfig, &agent.AppliedConfig)
 	if lastSeen.Valid {
 		agent.LastSeen = lastSeen.Time
+	}
+	if lastActivityEvent.Valid {
+		agent.LastActivityEvent = lastActivityEvent.Time
 	}
 	if deletedAt.Valid {
 		agent.DeletedAt = deletedAt.Time
@@ -848,7 +867,7 @@ func (s *SQLiteStore) UpdateAgent(ctx context.Context, agent *store.Agent) error
 			connection_state = ?, container_status = ?, runtime_state = ?,
 			image = ?, detached = ?, runtime = ?, runtime_broker_id = ?, web_pty_enabled = ?, task_summary = ?, message = ?,
 			applied_config = ?,
-			updated_at = ?, last_seen = ?, deleted_at = ?,
+			updated_at = ?, last_seen = ?, last_activity_event = ?, deleted_at = ?,
 			owner_id = ?, visibility = ?, state_version = ?
 		WHERE id = ? AND state_version = ?
 	`,
@@ -858,7 +877,7 @@ func (s *SQLiteStore) UpdateAgent(ctx context.Context, agent *store.Agent) error
 		agent.ConnectionState, agent.ContainerStatus, agent.RuntimeState,
 		agent.Image, agent.Detached, agent.Runtime, nullableString(agent.RuntimeBrokerID), agent.WebPTYEnabled, agent.TaskSummary, agent.Message,
 		marshalJSON(agent.AppliedConfig),
-		agent.Updated, nullableTime(agent.LastSeen), nullableTime(agent.DeletedAt),
+		agent.Updated, nullableTime(agent.LastSeen), nullableTime(agent.LastActivityEvent), nullableTime(agent.DeletedAt),
 		agent.OwnerID, agent.Visibility, newVersion,
 		agent.ID, agent.StateVersion,
 	)
@@ -953,7 +972,7 @@ func (s *SQLiteStore) ListAgents(ctx context.Context, filter store.AgentFilter, 
 			connection_state, container_status, runtime_state,
 			image, detached, runtime, runtime_broker_id, web_pty_enabled, task_summary, message,
 			applied_config,
-			created_at, updated_at, last_seen, deleted_at,
+			created_at, updated_at, last_seen, last_activity_event, deleted_at,
 			created_by, owner_id, visibility, state_version
 		FROM agents %s ORDER BY created_at DESC LIMIT ?
 	`, whereClause)
@@ -969,7 +988,7 @@ func (s *SQLiteStore) ListAgents(ctx context.Context, filter store.AgentFilter, 
 	for rows.Next() {
 		var agent store.Agent
 		var labels, annotations, appliedConfig string
-		var lastSeen, deletedAt sql.NullTime
+		var lastSeen, lastActivityEvent, deletedAt sql.NullTime
 		var runtimeBrokerID, message, toolName sql.NullString
 
 		if err := rows.Scan(
@@ -979,7 +998,7 @@ func (s *SQLiteStore) ListAgents(ctx context.Context, filter store.AgentFilter, 
 			&agent.ConnectionState, &agent.ContainerStatus, &agent.RuntimeState,
 			&agent.Image, &agent.Detached, &agent.Runtime, &runtimeBrokerID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
 			&appliedConfig,
-			&agent.Created, &agent.Updated, &lastSeen, &deletedAt,
+			&agent.Created, &agent.Updated, &lastSeen, &lastActivityEvent, &deletedAt,
 			&agent.CreatedBy, &agent.OwnerID, &agent.Visibility, &agent.StateVersion,
 		); err != nil {
 			return nil, err
@@ -990,6 +1009,9 @@ func (s *SQLiteStore) ListAgents(ctx context.Context, filter store.AgentFilter, 
 		unmarshalJSON(appliedConfig, &agent.AppliedConfig)
 		if lastSeen.Valid {
 			agent.LastSeen = lastSeen.Time
+		}
+		if lastActivityEvent.Valid {
+			agent.LastActivityEvent = lastActivityEvent.Time
 		}
 		if deletedAt.Valid {
 			agent.DeletedAt = deletedAt.Time
@@ -1039,6 +1061,7 @@ func (s *SQLiteStore) UpdateAgentStatus(ctx context.Context, id string, su store
 			container_status = COALESCE(NULLIF(?, ''), container_status),
 			runtime_state = COALESCE(NULLIF(?, ''), runtime_state),
 			task_summary = COALESCE(NULLIF(?, ''), task_summary),
+			last_activity_event = CASE WHEN ? != '' THEN ? ELSE last_activity_event END,
 			updated_at = ?,
 			last_seen = ?
 		WHERE id = ?
@@ -1048,6 +1071,7 @@ func (s *SQLiteStore) UpdateAgentStatus(ctx context.Context, id string, su store
 		activityProvided, su.ToolName,
 		su.Message, su.ConnectionState, su.ContainerStatus,
 		su.RuntimeState, su.TaskSummary,
+		su.Activity, now,
 		now, now, id,
 	)
 	if err != nil {
@@ -1114,7 +1138,7 @@ func (s *SQLiteStore) MarkStaleAgentsOffline(ctx context.Context, threshold time
 			connection_state, container_status, runtime_state,
 			image, detached, runtime, runtime_broker_id, web_pty_enabled, task_summary, message,
 			applied_config,
-			created_at, updated_at, last_seen, deleted_at,
+			created_at, updated_at, last_seen, last_activity_event, deleted_at,
 			created_by, owner_id, visibility, state_version
 		FROM agents
 		WHERE activity = 'offline' AND updated_at = ?
@@ -1131,7 +1155,7 @@ func (s *SQLiteStore) MarkStaleAgentsOffline(ctx context.Context, threshold time
 	for rows.Next() {
 		var agent store.Agent
 		var labels, annotations, appliedConfig string
-		var lastSeen, deletedAt sql.NullTime
+		var lastSeen, lastActivityEvent, deletedAt sql.NullTime
 		var runtimeBrokerID, message, toolName sql.NullString
 
 		if err := rows.Scan(
@@ -1141,7 +1165,7 @@ func (s *SQLiteStore) MarkStaleAgentsOffline(ctx context.Context, threshold time
 			&agent.ConnectionState, &agent.ContainerStatus, &agent.RuntimeState,
 			&agent.Image, &agent.Detached, &agent.Runtime, &runtimeBrokerID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
 			&appliedConfig,
-			&agent.Created, &agent.Updated, &lastSeen, &deletedAt,
+			&agent.Created, &agent.Updated, &lastSeen, &lastActivityEvent, &deletedAt,
 			&agent.CreatedBy, &agent.OwnerID, &agent.Visibility, &agent.StateVersion,
 		); err != nil {
 			return nil, err
@@ -1152,6 +1176,114 @@ func (s *SQLiteStore) MarkStaleAgentsOffline(ctx context.Context, threshold time
 		unmarshalJSON(appliedConfig, &agent.AppliedConfig)
 		if lastSeen.Valid {
 			agent.LastSeen = lastSeen.Time
+		}
+		if lastActivityEvent.Valid {
+			agent.LastActivityEvent = lastActivityEvent.Time
+		}
+		if deletedAt.Valid {
+			agent.DeletedAt = deletedAt.Time
+		}
+		if runtimeBrokerID.Valid {
+			agent.RuntimeBrokerID = runtimeBrokerID.String
+		}
+		if message.Valid {
+			agent.Message = message.String
+		}
+		if toolName.Valid {
+			agent.ToolName = toolName.String
+		}
+
+		agents = append(agents, agent)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return agents, nil
+}
+
+func (s *SQLiteStore) MarkStalledAgents(ctx context.Context, activityThreshold, heartbeatRecency time.Time) ([]store.Agent, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	now := time.Now()
+
+	// Update agents to stalled activity.
+	// Only affects agents that:
+	// - Have a stale last_activity_event (older than activityThreshold)
+	// - Have a recent heartbeat (last_seen >= heartbeatRecency) — process is alive
+	// - Are in the running phase
+	// - Are not already in a terminal/sticky activity or already stalled/offline
+	_, err = tx.ExecContext(ctx, `
+		UPDATE agents SET
+			activity = 'stalled',
+			updated_at = ?
+		WHERE last_activity_event < ?
+		  AND last_activity_event IS NOT NULL
+		  AND last_seen >= ?
+		  AND last_seen IS NOT NULL
+		  AND phase = 'running'
+		  AND activity NOT IN ('completed', 'limits_exceeded', 'stalled', 'offline')
+	`, now, activityThreshold, heartbeatRecency)
+	if err != nil {
+		return nil, err
+	}
+
+	// Fetch the agents that were just updated.
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, agent_id, name, template, grove_id,
+			labels, annotations,
+			phase, activity, tool_name,
+			connection_state, container_status, runtime_state,
+			image, detached, runtime, runtime_broker_id, web_pty_enabled, task_summary, message,
+			applied_config,
+			created_at, updated_at, last_seen, last_activity_event, deleted_at,
+			created_by, owner_id, visibility, state_version
+		FROM agents
+		WHERE activity = 'stalled' AND updated_at = ?
+		  AND last_activity_event < ?
+		  AND last_activity_event IS NOT NULL
+		  AND last_seen >= ?
+		  AND last_seen IS NOT NULL
+		  AND phase = 'running'
+	`, now, activityThreshold, heartbeatRecency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var agents []store.Agent
+	for rows.Next() {
+		var agent store.Agent
+		var labels, annotations, appliedConfig string
+		var lastSeen, lastActivityEvent, deletedAt sql.NullTime
+		var runtimeBrokerID, message, toolName sql.NullString
+
+		if err := rows.Scan(
+			&agent.ID, &agent.Slug, &agent.Name, &agent.Template, &agent.GroveID,
+			&labels, &annotations,
+			&agent.Phase, &agent.Activity, &toolName,
+			&agent.ConnectionState, &agent.ContainerStatus, &agent.RuntimeState,
+			&agent.Image, &agent.Detached, &agent.Runtime, &runtimeBrokerID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
+			&appliedConfig,
+			&agent.Created, &agent.Updated, &lastSeen, &lastActivityEvent, &deletedAt,
+			&agent.CreatedBy, &agent.OwnerID, &agent.Visibility, &agent.StateVersion,
+		); err != nil {
+			return nil, err
+		}
+
+		unmarshalJSON(labels, &agent.Labels)
+		unmarshalJSON(annotations, &agent.Annotations)
+		unmarshalJSON(appliedConfig, &agent.AppliedConfig)
+		if lastSeen.Valid {
+			agent.LastSeen = lastSeen.Time
+		}
+		if lastActivityEvent.Valid {
+			agent.LastActivityEvent = lastActivityEvent.Time
 		}
 		if deletedAt.Valid {
 			agent.DeletedAt = deletedAt.Time

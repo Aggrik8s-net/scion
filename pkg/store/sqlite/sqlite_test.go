@@ -1542,3 +1542,284 @@ func TestMarkStaleAgentsOffline_NoStaleAgents(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, agents, 0)
 }
+
+// ============================================================================
+// Stalled Agent Detection Tests
+// ============================================================================
+
+func TestMarkStalledAgents(t *testing.T) {
+	s := setupTestStore(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{
+		ID:         api.NewUUID(),
+		Name:       "Stalled Grove",
+		Slug:       "stalled-grove",
+		Visibility: store.VisibilityPrivate,
+	}
+	require.NoError(t, s.CreateGrove(ctx, grove))
+
+	staleActivityTime := time.Now().Add(-10 * time.Minute)
+	recentHeartbeat := time.Now().Add(-30 * time.Second)
+	activityThreshold := time.Now().Add(-5 * time.Minute)
+	heartbeatRecency := time.Now().Add(-2 * time.Minute)
+
+	// --- Should be marked stalled: stale activity + recent heartbeat ---
+	stalledActivities := []string{"idle", "thinking", "executing", "waiting_for_input"}
+	var expectedIDs []string
+	for _, activity := range stalledActivities {
+		agent := &store.Agent{
+			ID: api.NewUUID(), Slug: "stalled-" + activity, Name: "Stalled " + activity,
+			Template: "claude", GroveID: grove.ID, Phase: string(state.PhaseCreated),
+			Visibility: store.VisibilityPrivate,
+		}
+		require.NoError(t, s.CreateAgent(ctx, agent))
+		require.NoError(t, s.UpdateAgentStatus(ctx, agent.ID, store.AgentStatusUpdate{
+			Phase: "running", Activity: activity,
+		}))
+		// Manually set stale activity time + recent heartbeat
+		_, err := s.db.ExecContext(ctx,
+			"UPDATE agents SET last_activity_event = ?, last_seen = ? WHERE id = ?",
+			staleActivityTime, recentHeartbeat, agent.ID)
+		require.NoError(t, err)
+		expectedIDs = append(expectedIDs, agent.ID)
+	}
+
+	// --- Should NOT be marked stalled ---
+
+	// Recent activity (within threshold)
+	recentAgent := &store.Agent{
+		ID: api.NewUUID(), Slug: "recent-activity", Name: "Recent Activity",
+		Template: "claude", GroveID: grove.ID, Phase: string(state.PhaseCreated),
+		Visibility: store.VisibilityPrivate,
+	}
+	require.NoError(t, s.CreateAgent(ctx, recentAgent))
+	require.NoError(t, s.UpdateAgentStatus(ctx, recentAgent.ID, store.AgentStatusUpdate{
+		Phase: "running", Activity: "idle",
+	}))
+	// last_activity_event is set to now by UpdateAgentStatus, which is within threshold
+
+	// Stale activity + stale heartbeat (offline territory, not stalled)
+	offlineAgent := &store.Agent{
+		ID: api.NewUUID(), Slug: "offline-territory", Name: "Offline Territory",
+		Template: "claude", GroveID: grove.ID, Phase: string(state.PhaseCreated),
+		Visibility: store.VisibilityPrivate,
+	}
+	require.NoError(t, s.CreateAgent(ctx, offlineAgent))
+	require.NoError(t, s.UpdateAgentStatus(ctx, offlineAgent.ID, store.AgentStatusUpdate{
+		Phase: "running", Activity: "idle",
+	}))
+	staleHeartbeat := time.Now().Add(-5 * time.Minute)
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE agents SET last_activity_event = ?, last_seen = ? WHERE id = ?",
+		staleActivityTime, staleHeartbeat, offlineAgent.ID)
+	require.NoError(t, err)
+
+	// Completed activity (sticky — should not be stalled)
+	completedAgent := &store.Agent{
+		ID: api.NewUUID(), Slug: "completed-stall", Name: "Completed Stall",
+		Template: "claude", GroveID: grove.ID, Phase: string(state.PhaseCreated),
+		Visibility: store.VisibilityPrivate,
+	}
+	require.NoError(t, s.CreateAgent(ctx, completedAgent))
+	require.NoError(t, s.UpdateAgentStatus(ctx, completedAgent.ID, store.AgentStatusUpdate{
+		Phase: "running", Activity: "completed",
+	}))
+	_, err = s.db.ExecContext(ctx,
+		"UPDATE agents SET last_activity_event = ?, last_seen = ? WHERE id = ?",
+		staleActivityTime, recentHeartbeat, completedAgent.ID)
+	require.NoError(t, err)
+
+	// limits_exceeded activity (sticky)
+	limitsAgent := &store.Agent{
+		ID: api.NewUUID(), Slug: "limits-stall", Name: "Limits Stall",
+		Template: "claude", GroveID: grove.ID, Phase: string(state.PhaseCreated),
+		Visibility: store.VisibilityPrivate,
+	}
+	require.NoError(t, s.CreateAgent(ctx, limitsAgent))
+	require.NoError(t, s.UpdateAgentStatus(ctx, limitsAgent.ID, store.AgentStatusUpdate{
+		Phase: "running", Activity: "limits_exceeded",
+	}))
+	_, err = s.db.ExecContext(ctx,
+		"UPDATE agents SET last_activity_event = ?, last_seen = ? WHERE id = ?",
+		staleActivityTime, recentHeartbeat, limitsAgent.ID)
+	require.NoError(t, err)
+
+	// Stopped phase (not running)
+	stoppedAgent := &store.Agent{
+		ID: api.NewUUID(), Slug: "stopped-stall", Name: "Stopped Stall",
+		Template: "claude", GroveID: grove.ID, Phase: string(state.PhaseStopped),
+		Visibility: store.VisibilityPrivate,
+	}
+	require.NoError(t, s.CreateAgent(ctx, stoppedAgent))
+	_, err = s.db.ExecContext(ctx,
+		"UPDATE agents SET last_activity_event = ?, last_seen = ? WHERE id = ?",
+		staleActivityTime, recentHeartbeat, stoppedAgent.ID)
+	require.NoError(t, err)
+
+	// Already offline
+	alreadyOfflineAgent := &store.Agent{
+		ID: api.NewUUID(), Slug: "already-offline", Name: "Already Offline",
+		Template: "claude", GroveID: grove.ID, Phase: string(state.PhaseCreated),
+		Visibility: store.VisibilityPrivate,
+	}
+	require.NoError(t, s.CreateAgent(ctx, alreadyOfflineAgent))
+	require.NoError(t, s.UpdateAgentStatus(ctx, alreadyOfflineAgent.ID, store.AgentStatusUpdate{
+		Phase: "running", Activity: "offline",
+	}))
+	_, err = s.db.ExecContext(ctx,
+		"UPDATE agents SET last_activity_event = ?, last_seen = ? WHERE id = ?",
+		staleActivityTime, recentHeartbeat, alreadyOfflineAgent.ID)
+	require.NoError(t, err)
+
+	// Execute
+	agents, err := s.MarkStalledAgents(ctx, activityThreshold, heartbeatRecency)
+	require.NoError(t, err)
+	assert.Len(t, agents, len(stalledActivities), "should only mark running agents with stale activity and recent heartbeat")
+
+	// Verify the returned agents
+	returnedIDs := make(map[string]bool)
+	for _, a := range agents {
+		returnedIDs[a.ID] = true
+		assert.Equal(t, "stalled", a.Activity, "returned agent should have stalled activity")
+		assert.Equal(t, "running", a.Phase, "returned agent should still have running phase")
+	}
+	for _, id := range expectedIDs {
+		assert.True(t, returnedIDs[id], "expected agent %s to be in returned set", id)
+	}
+
+	// Verify excluded agents were NOT affected
+	a, err := s.GetAgent(ctx, recentAgent.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "idle", a.Activity)
+
+	a, err = s.GetAgent(ctx, offlineAgent.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "idle", a.Activity, "stale heartbeat agent should not be stalled")
+
+	a, err = s.GetAgent(ctx, completedAgent.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", a.Activity)
+
+	a, err = s.GetAgent(ctx, limitsAgent.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "limits_exceeded", a.Activity)
+
+	a, err = s.GetAgent(ctx, stoppedAgent.ID)
+	require.NoError(t, err)
+	assert.Equal(t, string(state.PhaseStopped), a.Phase)
+
+	a, err = s.GetAgent(ctx, alreadyOfflineAgent.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "offline", a.Activity)
+}
+
+func TestMarkStalledAgents_Idempotent(t *testing.T) {
+	s := setupTestStore(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{
+		ID:         api.NewUUID(),
+		Name:       "Idempotent Stalled Grove",
+		Slug:       "idempotent-stalled",
+		Visibility: store.VisibilityPrivate,
+	}
+	require.NoError(t, s.CreateGrove(ctx, grove))
+
+	staleActivityTime := time.Now().Add(-10 * time.Minute)
+	recentHeartbeat := time.Now().Add(-30 * time.Second)
+	activityThreshold := time.Now().Add(-5 * time.Minute)
+	heartbeatRecency := time.Now().Add(-2 * time.Minute)
+
+	agent := &store.Agent{
+		ID: api.NewUUID(), Slug: "stalled-idem", Name: "Stalled Idem",
+		Template: "claude", GroveID: grove.ID, Phase: string(state.PhaseCreated),
+		Visibility: store.VisibilityPrivate,
+	}
+	require.NoError(t, s.CreateAgent(ctx, agent))
+	require.NoError(t, s.UpdateAgentStatus(ctx, agent.ID, store.AgentStatusUpdate{
+		Phase: "running", Activity: "idle",
+	}))
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE agents SET last_activity_event = ?, last_seen = ? WHERE id = ?",
+		staleActivityTime, recentHeartbeat, agent.ID)
+	require.NoError(t, err)
+
+	// First call should mark it stalled
+	agents, err := s.MarkStalledAgents(ctx, activityThreshold, heartbeatRecency)
+	require.NoError(t, err)
+	assert.Len(t, agents, 1)
+
+	// Second call should return empty (already stalled)
+	agents, err = s.MarkStalledAgents(ctx, activityThreshold, heartbeatRecency)
+	require.NoError(t, err)
+	assert.Len(t, agents, 0, "should not re-mark already stalled agents")
+}
+
+func TestMarkStalledAgents_NoAgents(t *testing.T) {
+	s := setupTestStore(t)
+	ctx := context.Background()
+
+	activityThreshold := time.Now().Add(-5 * time.Minute)
+	heartbeatRecency := time.Now().Add(-2 * time.Minute)
+
+	agents, err := s.MarkStalledAgents(ctx, activityThreshold, heartbeatRecency)
+	require.NoError(t, err)
+	assert.Len(t, agents, 0)
+}
+
+func TestUpdateAgentStatus_SetsLastActivityEvent(t *testing.T) {
+	s := setupTestStore(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{
+		ID:         api.NewUUID(),
+		Name:       "Activity Event Grove",
+		Slug:       "activity-event-grove",
+		Visibility: store.VisibilityPrivate,
+	}
+	require.NoError(t, s.CreateGrove(ctx, grove))
+
+	agent := &store.Agent{
+		ID: api.NewUUID(), Slug: "activity-tracker", Name: "Activity Tracker",
+		Template: "claude", GroveID: grove.ID, Phase: string(state.PhaseCreated),
+		Visibility: store.VisibilityPrivate,
+	}
+	require.NoError(t, s.CreateAgent(ctx, agent))
+
+	// Activity update should set last_activity_event
+	require.NoError(t, s.UpdateAgentStatus(ctx, agent.ID, store.AgentStatusUpdate{
+		Phase: "running", Activity: "thinking",
+	}))
+
+	a, err := s.GetAgent(ctx, agent.ID)
+	require.NoError(t, err)
+	assert.False(t, a.LastActivityEvent.IsZero(), "last_activity_event should be set after activity update")
+	activityTime := a.LastActivityEvent
+
+	// Heartbeat-only update (no activity) should NOT change last_activity_event
+	// Manually set last_activity_event to a known past time first
+	pastTime := time.Now().Add(-10 * time.Minute)
+	_, err = s.db.ExecContext(ctx, "UPDATE agents SET last_activity_event = ? WHERE id = ?", pastTime, agent.ID)
+	require.NoError(t, err)
+
+	require.NoError(t, s.UpdateAgentStatus(ctx, agent.ID, store.AgentStatusUpdate{
+		Heartbeat: true,
+	}))
+
+	a, err = s.GetAgent(ctx, agent.ID)
+	require.NoError(t, err)
+	// last_activity_event should still be the past time, not updated
+	assert.True(t, a.LastActivityEvent.Before(activityTime),
+		"heartbeat-only update should not change last_activity_event")
+
+	// Another activity update should update last_activity_event
+	require.NoError(t, s.UpdateAgentStatus(ctx, agent.ID, store.AgentStatusUpdate{
+		Activity: "executing",
+	}))
+
+	a, err = s.GetAgent(ctx, agent.ID)
+	require.NoError(t, err)
+	assert.True(t, a.LastActivityEvent.After(pastTime),
+		"activity update should update last_activity_event")
+}

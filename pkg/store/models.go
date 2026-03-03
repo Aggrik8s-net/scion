@@ -64,10 +64,11 @@ type Agent struct {
 	AppliedConfig *AgentAppliedConfig `json:"appliedConfig,omitempty"`
 
 	// Timestamps
-	Created   time.Time `json:"created"`
-	Updated   time.Time `json:"updated"`
-	LastSeen  time.Time `json:"lastSeen,omitempty"`
-	DeletedAt time.Time `json:"deletedAt,omitempty"`
+	Created           time.Time `json:"created"`
+	Updated           time.Time `json:"updated"`
+	LastSeen          time.Time `json:"lastSeen,omitempty"`
+	LastActivityEvent time.Time `json:"lastActivityEvent,omitempty"`
+	DeletedAt         time.Time `json:"deletedAt,omitempty"`
 
 	// Ownership
 	CreatedBy  string `json:"createdBy,omitempty"`

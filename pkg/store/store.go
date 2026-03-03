@@ -126,6 +126,13 @@ type AgentStore interface {
 	// activity is not a terminal sticky state (completed, limits_exceeded).
 	// Returns the updated agent records for event publishing.
 	MarkStaleAgentsOffline(ctx context.Context, threshold time.Time) ([]Agent, error)
+
+	// MarkStalledAgents marks running agents as stalled when their last activity
+	// event is older than activityThreshold but they have a recent heartbeat
+	// (last_seen >= heartbeatRecency). Only affects agents with phase=running
+	// whose activity is not a terminal sticky state or already stalled/offline.
+	// Returns the updated agent records for event publishing.
+	MarkStalledAgents(ctx context.Context, activityThreshold, heartbeatRecency time.Time) ([]Agent, error)
 }
 
 // AgentFilter defines criteria for filtering agents.

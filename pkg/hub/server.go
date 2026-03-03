@@ -85,6 +85,10 @@ type ServerConfig struct {
 	BrokerAuthConfig BrokerAuthConfig
 	// HubEndpoint is the public endpoint URL for this Hub (used in broker join responses).
 	HubEndpoint string
+	// StalledThreshold is how long an agent can go without activity events
+	// before being marked as stalled (default: 5 minutes). Only applies to
+	// agents with a recent heartbeat (not already offline).
+	StalledThreshold time.Duration
 	// SoftDeleteRetention is how long soft-deleted agents are retained before purging.
 	// Zero means soft-delete is disabled (hard-delete immediately).
 	SoftDeleteRetention time.Duration
@@ -114,6 +118,7 @@ func DefaultServerConfig() ServerConfig {
 			"X-Scion-Signature", "X-Scion-Signed-Headers",
 		},
 		CORSMaxAge:       3600,
+		StalledThreshold: 5 * time.Minute,
 		BrokerAuthConfig:   DefaultBrokerAuthConfig(),
 	}
 }
@@ -870,6 +875,33 @@ func (s *Server) agentHeartbeatTimeoutHandler() func(ctx context.Context) {
 	}
 }
 
+// agentStalledDetectionHandler returns a recurring handler function that marks
+// agents as stalled when their last activity event exceeds the stalled threshold
+// but they still have a recent heartbeat (process alive but hung).
+// It publishes status events for each affected agent so SSE subscribers and the
+// notification system are informed.
+func (s *Server) agentStalledDetectionHandler() func(ctx context.Context) {
+	return func(ctx context.Context) {
+		activityThreshold := time.Now().Add(-s.config.StalledThreshold)
+		heartbeatRecency := time.Now().Add(-2 * time.Minute)
+
+		agents, err := s.store.MarkStalledAgents(ctx, activityThreshold, heartbeatRecency)
+		if err != nil {
+			slog.Error("Scheduler: stalled detection check failed", "error", err)
+			return
+		}
+
+		for i := range agents {
+			s.events.PublishAgentStatus(ctx, &agents[i])
+		}
+
+		if len(agents) > 0 {
+			slog.Info("Scheduler: marked stalled agents",
+				"count", len(agents), "threshold", s.config.StalledThreshold)
+		}
+	}
+}
+
 // purgeHandler returns a recurring handler function that permanently removes
 // soft-deleted agents that have exceeded the retention period.
 func (s *Server) purgeHandler() func(ctx context.Context) {
@@ -961,6 +993,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// Initialize and start the scheduler
 	s.scheduler = NewScheduler(s.store, logging.Subsystem("hub.scheduler"))
 	s.scheduler.RegisterRecurring("agent-heartbeat-timeout", 1, s.agentHeartbeatTimeoutHandler())
+	s.scheduler.RegisterRecurring("agent-stalled-detection", 1, s.agentStalledDetectionHandler())
 	if s.config.SoftDeleteRetention > 0 {
 		s.scheduler.RegisterRecurring("soft-delete-purge", 60, s.purgeHandler())
 	}
