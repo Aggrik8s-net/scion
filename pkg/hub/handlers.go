@@ -5993,6 +5993,10 @@ func (s *Server) createNotifySubscription(ctx context.Context, agentID, groveID,
 	if err := s.store.CreateNotificationSubscription(ctx, sub); err != nil {
 		slog.Warn("Failed to create notification subscription",
 			"agentID", agentID, "subscriber", notifySubscriberID, "error", err)
+	} else {
+		slog.Debug("Created notification subscription",
+			"subscriptionID", sub.ID, "agentID", agentID,
+			"subscriberType", notifySubscriberType, "subscriberID", notifySubscriberID)
 	}
 }
 

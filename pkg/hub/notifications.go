@@ -91,6 +91,9 @@ func (nd *NotificationDispatcher) handleEvent(evt Event) {
 
 	ctx := context.Background()
 
+	slog.Debug("Notification dispatcher received event",
+		"agentID", statusEvt.AgentID, "activity", statusEvt.Activity, "phase", statusEvt.Phase)
+
 	subs, err := nd.store.GetNotificationSubscriptions(ctx, statusEvt.AgentID)
 	if err != nil {
 		slog.Error("Failed to get notification subscriptions",
@@ -103,6 +106,9 @@ func (nd *NotificationDispatcher) handleEvent(evt Event) {
 
 	// Use activity for matching (notifications trigger on activity changes)
 	matchStatus := statusEvt.Activity
+
+	slog.Debug("Notification dispatcher checking subscriptions",
+		"agentID", statusEvt.AgentID, "activity", matchStatus, "subscriptionCount", len(subs))
 
 	for i := range subs {
 		sub := &subs[i]
