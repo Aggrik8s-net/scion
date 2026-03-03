@@ -17,18 +17,23 @@ set -e
 
 # Trigger Cloud Build for scion images
 # Usage: trigger-cloudbuild.sh [target]
-#   target: all (default), core-base, scion-base, harnesses
+#   target: common (default), all, core-base, scion-base, harnesses
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
-TARGET="${1:-all}"
+TARGET="${1:-common}"
 PROJECT="${PROJECT:-ptone-misc}"
 SHORT_SHA=$(git rev-parse --short HEAD)
 COMMIT_SHA=$(git rev-parse HEAD)
 
 case "${TARGET}" in
+  common)
+    echo "Submitting common build (scion-base -> harnesses) to Cloud Build..."
+    CONFIG="image-build/cloudbuild-common.yaml"
+    SUBSTITUTIONS="_SHORT_SHA=${SHORT_SHA},_COMMIT_SHA=${COMMIT_SHA}"
+    ;;
   all)
     echo "Submitting full build (core-base -> scion-base -> harnesses) to Cloud Build..."
     CONFIG="image-build/cloudbuild.yaml"
@@ -51,10 +56,11 @@ case "${TARGET}" in
     ;;
   *)
     echo "Unknown target: ${TARGET}"
-    echo "Usage: trigger-cloudbuild.sh [all|core-base|scion-base|harnesses]"
+    echo "Usage: trigger-cloudbuild.sh [common|all|core-base|scion-base|harnesses]"
     echo ""
     echo "Targets:"
-    echo "  all         - Full rebuild of all images (default)"
+    echo "  common      - Rebuild scion-base + harnesses, skip core-base (default)"
+    echo "  all         - Full rebuild of all images including core-base"
     echo "  core-base   - Build only core-base (foundation tools)"
     echo "  scion-base  - Build only scion-base (uses existing core-base:latest)"
     echo "  harnesses   - Build only harnesses (uses existing scion-base:latest)"
