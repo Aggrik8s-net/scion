@@ -435,6 +435,9 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 				if s.Type == "environment" || s.Type == "" {
 					secretTargets[s.Target] = struct{}{}
 				}
+				if s.Type == "file" {
+					secretTargets[s.Name] = struct{}{}
+				}
 			}
 
 			if s.config.Debug {
@@ -1317,6 +1320,31 @@ func (s *Server) extractRequiredEnvKeys(req CreateAgentRequest) ([]string, map[s
 					canonicalKey := group[0]
 					required[canonicalKey] = struct{}{}
 					secretInfo[canonicalKey] = api.SecretKeyInfo{Source: "auth"}
+				}
+			}
+		}
+
+		// Phase 1b: Auth-required file secrets (e.g. ADC for vertex-ai)
+		if authSecrets := harness.RequiredAuthSecrets(harnessType, authType); len(authSecrets) > 0 {
+			// Build lookup of file-type resolved secrets by Name and Target suffix
+			fileSecrets := make(map[string]struct{})
+			for _, sec := range req.ResolvedSecrets {
+				if sec.Type == "file" {
+					fileSecrets[sec.Name] = struct{}{}
+					if sec.Target != "" {
+						fileSecrets[sec.Target] = struct{}{}
+					}
+				}
+			}
+
+			for _, as := range authSecrets {
+				if _, ok := fileSecrets[as.Key]; !ok {
+					required[as.Key] = struct{}{}
+					secretInfo[as.Key] = api.SecretKeyInfo{
+						Description: as.Description,
+						Source:      "auth",
+						Type:        "file",
+					}
 				}
 			}
 		}

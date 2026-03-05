@@ -429,6 +429,54 @@ func TestRequiredAuthEnvKeys(t *testing.T) {
 	}
 }
 
+func TestRequiredAuthSecrets(t *testing.T) {
+	tests := []struct {
+		name     string
+		harness  string
+		authType string
+		wantNil  bool
+		wantKey  string
+		wantType string
+	}{
+		{"claude vertex-ai", "claude", "vertex-ai", false, "GOOGLE_APPLICATION_CREDENTIALS", "file"},
+		{"gemini vertex-ai", "gemini", "vertex-ai", false, "GOOGLE_APPLICATION_CREDENTIALS", "file"},
+		{"opencode vertex-ai", "opencode", "vertex-ai", false, "GOOGLE_APPLICATION_CREDENTIALS", "file"},
+		{"codex vertex-ai", "codex", "vertex-ai", false, "GOOGLE_APPLICATION_CREDENTIALS", "file"},
+		{"claude api-key", "claude", "api-key", true, "", ""},
+		{"gemini api-key", "gemini", "api-key", true, "", ""},
+		{"claude empty auth type", "claude", "", true, "", ""},
+		{"gemini empty auth type", "gemini", "", true, "", ""},
+		{"generic vertex-ai", "generic", "vertex-ai", true, "", ""},
+		{"unknown harness", "unknown", "vertex-ai", true, "", ""},
+		{"empty harness", "", "vertex-ai", true, "", ""},
+		{"both empty", "", "", true, "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RequiredAuthSecrets(tt.harness, tt.authType)
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("RequiredAuthSecrets(%q, %q) = %v, want nil", tt.harness, tt.authType, got)
+				}
+				return
+			}
+			if len(got) != 1 {
+				t.Fatalf("RequiredAuthSecrets(%q, %q) returned %d secrets, want 1", tt.harness, tt.authType, len(got))
+			}
+			if got[0].Key != tt.wantKey {
+				t.Errorf("Key = %q, want %q", got[0].Key, tt.wantKey)
+			}
+			if got[0].Type != tt.wantType {
+				t.Errorf("Type = %q, want %q", got[0].Type, tt.wantType)
+			}
+			if got[0].Description == "" {
+				t.Error("Description should not be empty")
+			}
+		})
+	}
+}
+
 func TestGatherAuthWithEnv_EmptyOverlayValueFallsThrough(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "process-gemini")
 

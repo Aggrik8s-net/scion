@@ -197,6 +197,33 @@ func ValidateAuth(resolved *api.ResolvedAuth) error {
 	return nil
 }
 
+// RequiredAuthSecrets maps a (harnessName, authSelectedType) pair to
+// file-type secrets required by that combination. This is the file-secret
+// counterpart to RequiredAuthEnvKeys (which covers env var requirements).
+// For vertex-ai auth, the ADC credential file is required.
+// Returns nil for auth methods that have no file-secret requirements.
+func RequiredAuthSecrets(harnessName, authSelectedType string) []api.RequiredSecret {
+	effectiveType := authSelectedType
+	if effectiveType == "" {
+		effectiveType = "api-key"
+	}
+
+	switch harnessName {
+	case "claude", "gemini", "opencode", "codex":
+		if effectiveType == "vertex-ai" {
+			return []api.RequiredSecret{
+				{
+					Key:         "GOOGLE_APPLICATION_CREDENTIALS",
+					Type:        "file",
+					Description: "Google Cloud Application Default Credentials (ADC) file for vertex-ai authentication",
+				},
+			}
+		}
+	}
+
+	return nil
+}
+
 // RequiredAuthEnvKeys maps a (harnessName, authSelectedType) pair to the
 // env var key groups required by that combination. Each inner slice is a
 // set of alternatives — any one key satisfying the group is sufficient

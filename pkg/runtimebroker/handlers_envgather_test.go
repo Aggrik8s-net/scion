@@ -1305,3 +1305,128 @@ profiles:
 		t.Errorf("expected HarnessConfig='claude', got %q", mgr.lastHarnessConfig)
 	}
 }
+
+// TestEnvGather_VertexAI_RequiresADCFile tests that vertex-ai auth without
+// an ADC file secret returns 202 with GOOGLE_APPLICATION_CREDENTIALS in needs
+// and SecretInfo showing type=file.
+func TestEnvGather_VertexAI_RequiresADCFile(t *testing.T) {
+	srv, _, groveDir := newTestServerWithHarnessConfig(t, "claude",
+		"harness: claude\nimage: test-image\nuser: scion\nauth_selected_type: vertex-ai\n",
+		`
+schema_version: "1"
+harness_configs:
+  claude:
+    harness: claude
+profiles:
+  default:
+    runtime: mock
+`)
+
+	// Provide project and region env vars so those are satisfied,
+	// but do NOT provide ADC file secret
+	body := `{
+		"name": "test-agent-vertex-adc",
+		"id": "agent-uuid-vadc",
+		"gatherEnv": true,
+		"grovePath": "` + groveDir + `",
+		"resolvedEnv": {
+			"GOOGLE_CLOUD_PROJECT": "my-project",
+			"GOOGLE_CLOUD_REGION": "us-central1"
+		},
+		"config": {"template": "claude", "profile": "default"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var envReqs EnvRequirementsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &envReqs); err != nil {
+		t.Fatal("failed to decode response:", err)
+	}
+
+	// GOOGLE_APPLICATION_CREDENTIALS should be in needs
+	found := false
+	for _, k := range envReqs.Needs {
+		if k == "GOOGLE_APPLICATION_CREDENTIALS" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected GOOGLE_APPLICATION_CREDENTIALS in needs, got %v", envReqs.Needs)
+	}
+
+	// SecretInfo should show type=file and source=auth
+	if envReqs.SecretInfo == nil {
+		t.Fatal("expected SecretInfo to be set")
+	}
+	info, ok := envReqs.SecretInfo["GOOGLE_APPLICATION_CREDENTIALS"]
+	if !ok {
+		t.Fatal("expected GOOGLE_APPLICATION_CREDENTIALS in SecretInfo")
+	}
+	if info.Type != "file" {
+		t.Errorf("expected type='file', got %q", info.Type)
+	}
+	if info.Source != "auth" {
+		t.Errorf("expected source='auth', got %q", info.Source)
+	}
+	if info.Description == "" {
+		t.Error("expected non-empty description for ADC secret")
+	}
+}
+
+// TestEnvGather_VertexAI_ADCSatisfied tests that vertex-ai auth with a
+// file-type resolved secret for ADC passes through without returning 202
+// for GOOGLE_APPLICATION_CREDENTIALS.
+func TestEnvGather_VertexAI_ADCSatisfied(t *testing.T) {
+	srv, _, groveDir := newTestServerWithHarnessConfig(t, "claude",
+		"harness: claude\nimage: test-image\nuser: scion\nauth_selected_type: vertex-ai\n",
+		`
+schema_version: "1"
+harness_configs:
+  claude:
+    harness: claude
+profiles:
+  default:
+    runtime: mock
+`)
+
+	// Provide project, region, AND ADC file secret
+	body := `{
+		"name": "test-agent-vertex-adc-sat",
+		"id": "agent-uuid-vadcs",
+		"gatherEnv": true,
+		"grovePath": "` + groveDir + `",
+		"resolvedEnv": {
+			"GOOGLE_CLOUD_PROJECT": "my-project",
+			"GOOGLE_CLOUD_REGION": "us-central1"
+		},
+		"resolvedSecrets": [
+			{"name": "GOOGLE_APPLICATION_CREDENTIALS", "type": "file", "target": "/home/scion/.config/gcloud/application_default_credentials.json", "value": "{\"type\":\"authorized_user\"}", "source": "user"}
+		],
+		"config": {"template": "claude", "profile": "default"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	// Should NOT return 202 — all requirements are satisfied
+	if w.Code == http.StatusAccepted {
+		var envReqs EnvRequirementsResponse
+		json.Unmarshal(w.Body.Bytes(), &envReqs)
+		// Check that GOOGLE_APPLICATION_CREDENTIALS is not in needs
+		for _, k := range envReqs.Needs {
+			if k == "GOOGLE_APPLICATION_CREDENTIALS" {
+				t.Fatalf("GOOGLE_APPLICATION_CREDENTIALS should not be in needs when ADC file secret is provided, got needs=%v", envReqs.Needs)
+			}
+		}
+	}
+}
