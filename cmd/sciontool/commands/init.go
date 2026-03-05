@@ -221,29 +221,19 @@ func runInit(args []string) int {
 			log.Debug("Could not look up user for UID %d: %v", targetUID, err)
 		}
 	}
-	// Workaround: On Apple Virtualization Framework runtimes, Claude Code
-	// creates a dangling symlink at ~/.claude/debug/latest that causes
-	// container removal to hang. Pre-create the debug directory as
-	// root-owned so the scion user process cannot write into it.
+	// Workaround: Claude Code creates a dangling symlink at
+	// ~/.claude/debug/latest that causes apple-container removal to hang.
+	// Pre-create the directory as read-only (0555) so no symlinks can be
+	// created inside it. We use chmod rather than chown because chown is
+	// silently a no-op on VirtioFS mounts used by the Apple VZ runtime.
 	if isClaude(childArgs) {
-		claudeDir := filepath.Join(agentHome, ".claude")
-		debugDir := filepath.Join(claudeDir, "debug")
+		debugDir := filepath.Join(agentHome, ".claude", "debug")
 		if err := os.MkdirAll(debugDir, 0755); err != nil {
-			log.Debug("Failed to create debug directory %s: %v", debugDir, err)
+			log.Error("Failed to create debug directory %s: %v", debugDir, err)
+		} else if err := os.Chmod(debugDir, 0555); err != nil {
+			log.Error("Failed to chmod debug directory %s: %v", debugDir, err)
 		} else {
-			// Ensure the parent .claude directory is owned by the agent
-			// user so that Claude Code can write its config there.
-			if targetUID != 0 {
-				if err := os.Chown(claudeDir, targetUID, targetGID); err != nil {
-					log.Debug("Failed to chown %s: %v", claudeDir, err)
-				}
-			}
-			// Ensure root ownership on the debug directory so the scion
-			// user cannot create symlinks inside it.
-			if err := os.Chown(debugDir, 0, 0); err != nil {
-				log.Debug("Failed to chown debug directory to root: %v", err)
-			}
-			log.Info("Created root-owned debug directory %s (apple-container workaround)", debugDir)
+			log.Debug("Blocked debug symlink: set %s to read-only", debugDir)
 		}
 	}
 
@@ -468,18 +458,6 @@ func runInit(args []string) int {
 		heartbeatCancel()
 		<-heartbeatDone
 		log.Debug("Heartbeat loop stopped")
-	}
-
-	// Workaround: On some systems using the Apple Virtualization Framework
-	// (apple-container runtime), this dangling symlink causes the container
-	// removal to hang. Remove it preemptively during shutdown.
-	const debugLatestSymlink = "/home/scion/.claude/debug/latest"
-	if err := os.Remove(debugLatestSymlink); err != nil {
-		if !os.IsNotExist(err) {
-			log.Debug("Failed to remove debug symlink %s: %v", debugLatestSymlink, err)
-		}
-	} else {
-		log.Debug("Removed debug symlink %s (apple-container workaround)", debugLatestSymlink)
 	}
 
 	// Report shutting down to Hub if in hosted mode
@@ -863,12 +841,21 @@ func buildAuthenticatedURL(cloneURL, token string) string {
 }
 
 // isClaude returns true when the child command is for the Claude Code harness.
+// It scans all arguments because the harness binary may not be the first
+// argument (e.g. "tmux new-session -s scion claude --no-chrome ...").
+// It also handles the case where the harness command is joined into a single
+// string passed to tmux (e.g. "claude --no-chrome --dangerously-skip-permissions").
 func isClaude(childArgs []string) bool {
-	if len(childArgs) == 0 {
-		return false
+	for _, arg := range childArgs {
+		// Split on whitespace to handle joined command strings
+		for _, word := range strings.Fields(arg) {
+			base := filepath.Base(word)
+			if base == "claude" || strings.HasPrefix(base, "claude-") {
+				return true
+			}
+		}
 	}
-	base := filepath.Base(childArgs[0])
-	return base == "claude" || strings.HasPrefix(base, "claude-")
+	return false
 }
 
 // isWorkspaceEmpty returns true if the directory doesn't exist or contains no entries.
