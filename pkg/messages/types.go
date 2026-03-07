@@ -103,6 +103,18 @@ func NewInstruction(sender, recipient, msg string) *StructuredMessage {
 	}
 }
 
+// NewNotification creates a new notification message (state-change or input-needed).
+func NewNotification(sender, recipient, msg, msgType string) *StructuredMessage {
+	return &StructuredMessage{
+		Version:   Version,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Sender:    sender,
+		Recipient: recipient,
+		Msg:       msg,
+		Type:      msgType,
+	}
+}
+
 // SenderPrefix returns the type prefix for a sender identity string.
 // For example, "user:alice" returns "user", "agent:code-reviewer" returns "agent".
 func SenderPrefix(identity string) string {

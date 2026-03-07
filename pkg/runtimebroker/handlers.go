@@ -1287,17 +1287,14 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, id string) 
 		return
 	}
 
-	// Determine the message to deliver
+	// Determine the message to deliver.
+	// Empty messages (no body) are sent as an empty string, which the agent
+	// manager delivers as a plain tmux Enter keypress to trigger confirmations.
 	var deliveryText string
 	if req.StructuredMessage != nil {
-		// Structured message path: format for harness delivery
 		deliveryText = messages.FormatForDelivery(req.StructuredMessage)
-	} else if req.Message != "" {
-		// Legacy plain-text path
-		deliveryText = req.Message
 	} else {
-		ValidationError(w, "message or structured_message is required", nil)
-		return
+		deliveryText = req.Message
 	}
 
 	if err := s.manager.Message(ctx, id, deliveryText, req.Interrupt); err != nil {

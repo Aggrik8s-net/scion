@@ -41,15 +41,16 @@ type recordingDispatcher struct {
 }
 
 type dispatchCall struct {
-	Agent     *store.Agent
-	Message   string
-	Interrupt bool
+	Agent             *store.Agent
+	Message           string
+	Interrupt         bool
+	StructuredMessage *messages.StructuredMessage
 }
 
-func (d *recordingDispatcher) DispatchAgentMessage(_ context.Context, agent *store.Agent, message string, interrupt bool, _ *messages.StructuredMessage) error {
+func (d *recordingDispatcher) DispatchAgentMessage(_ context.Context, agent *store.Agent, message string, interrupt bool, structuredMsg *messages.StructuredMessage) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.calls = append(d.calls, dispatchCall{Agent: agent, Message: message, Interrupt: interrupt})
+	d.calls = append(d.calls, dispatchCall{Agent: agent, Message: message, Interrupt: interrupt, StructuredMessage: structuredMsg})
 	return d.returnErr
 }
 
@@ -220,6 +221,14 @@ func TestNotificationDispatcher_HappyPath(t *testing.T) {
 	assert.Equal(t, env.subscriber.ID, calls[0].Agent.ID)
 	assert.Contains(t, calls[0].Message, "watched-agent has reached a state of COMPLETED")
 	assert.False(t, calls[0].Interrupt)
+
+	// Verify structured message was produced
+	sm := calls[0].StructuredMessage
+	require.NotNil(t, sm, "structured message should be set")
+	assert.Equal(t, "agent:watched-agent", sm.Sender)
+	assert.Equal(t, "agent:subscriber-agent", sm.Recipient)
+	assert.Equal(t, messages.TypeStateChange, sm.Type)
+	assert.Contains(t, sm.Msg, "watched-agent has reached a state of COMPLETED")
 
 	// Verify notification was stored
 	notifs, err := env.store.GetNotifications(context.Background(), store.SubscriberTypeAgent, env.subscriber.Slug, false)
@@ -637,10 +646,15 @@ func TestNotificationDispatcher_CompletedWithTaskSummary(t *testing.T) {
 	}, 2*time.Second, 50*time.Millisecond)
 
 	calls := env.dispatcher.getCalls()
-	assert.Equal(t, agentNotificationPrefix+"watched-agent has reached a state of COMPLETED: Refactored auth module", calls[0].Message)
+	assert.Equal(t, "watched-agent has reached a state of COMPLETED: Refactored auth module", calls[0].Message)
+
+	sm := calls[0].StructuredMessage
+	require.NotNil(t, sm)
+	assert.Equal(t, "agent:watched-agent", sm.Sender)
+	assert.Equal(t, messages.TypeStateChange, sm.Type)
 }
 
-func TestNotificationDispatcher_AgentDispatchIncludesPrefix(t *testing.T) {
+func TestNotificationDispatcher_AgentDispatchUsesStructuredMessage(t *testing.T) {
 	env := setupNotificationTest(t)
 	env.nd.Start()
 	defer env.nd.Stop()
@@ -653,15 +667,23 @@ func TestNotificationDispatcher_AgentDispatchIncludesPrefix(t *testing.T) {
 
 	calls := env.dispatcher.getCalls()
 
-	// Dispatched message to agent should include the context prefix
-	assert.True(t, len(calls[0].Message) > len(agentNotificationPrefix))
-	assert.Contains(t, calls[0].Message, agentNotificationPrefix)
+	// Dispatched message should have a structured message with proper sender/type
+	sm := calls[0].StructuredMessage
+	require.NotNil(t, sm)
+	assert.Equal(t, "agent:watched-agent", sm.Sender)
+	assert.Equal(t, "agent:subscriber-agent", sm.Recipient)
+	assert.Equal(t, messages.TypeStateChange, sm.Type)
+	assert.Equal(t, messages.Version, sm.Version)
+	assert.NotEmpty(t, sm.Timestamp)
 
-	// Stored notification should NOT include the prefix (it is added at dispatch time only)
+	// Plain message field should match the notification message (no prefix)
+	assert.Equal(t, calls[0].Message, sm.Msg)
+
+	// Stored notification message matches
 	notifs, err := env.store.GetNotifications(context.Background(), store.SubscriberTypeAgent, env.subscriber.Slug, false)
 	require.NoError(t, err)
 	require.Len(t, notifs, 1)
-	assert.NotContains(t, notifs[0].Message, agentNotificationPrefix)
+	assert.Equal(t, calls[0].Message, notifs[0].Message)
 }
 
 func TestNotificationDispatcher_WaitingForInputWithMessage(t *testing.T) {
@@ -681,7 +703,22 @@ func TestNotificationDispatcher_WaitingForInputWithMessage(t *testing.T) {
 	}, 2*time.Second, 50*time.Millisecond)
 
 	calls := env.dispatcher.getCalls()
-	assert.Equal(t, agentNotificationPrefix+"watched-agent is WAITING_FOR_INPUT: Please approve the PR", calls[0].Message)
+	assert.Equal(t, "watched-agent is WAITING_FOR_INPUT: Please approve the PR", calls[0].Message)
+
+	// Verify input-needed type is used for waiting_for_input status
+	sm := calls[0].StructuredMessage
+	require.NotNil(t, sm)
+	assert.Equal(t, messages.TypeInputNeeded, sm.Type)
+	assert.Equal(t, "agent:watched-agent", sm.Sender)
+}
+
+func TestNotificationMessageType(t *testing.T) {
+	assert.Equal(t, messages.TypeInputNeeded, notificationMessageType("WAITING_FOR_INPUT"))
+	assert.Equal(t, messages.TypeInputNeeded, notificationMessageType("waiting_for_input"))
+	assert.Equal(t, messages.TypeStateChange, notificationMessageType("COMPLETED"))
+	assert.Equal(t, messages.TypeStateChange, notificationMessageType("ERROR"))
+	assert.Equal(t, messages.TypeStateChange, notificationMessageType("STALLED"))
+	assert.Equal(t, messages.TypeStateChange, notificationMessageType("LIMITS_EXCEEDED"))
 }
 
 func TestNotificationDispatcher_StalledActivity(t *testing.T) {

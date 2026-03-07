@@ -95,6 +95,23 @@ func TestFormatForDelivery_StripsRecipient(t *testing.T) {
 	}
 }
 
+func TestFormatForDelivery_EmptyMsg(t *testing.T) {
+	msg := &StructuredMessage{
+		Version:   Version,
+		Timestamp: "2026-03-07T14:30:00Z",
+		Sender:    "user:alice",
+		Recipient: "agent:dev",
+		Msg:       "",
+		Type:      TypeInstruction,
+		Plain:     true,
+	}
+
+	result := FormatForDelivery(msg)
+	if result != "" {
+		t.Errorf("empty plain message should return empty string, got %q", result)
+	}
+}
+
 func TestFormatForDelivery_WithAttachments(t *testing.T) {
 	msg := &StructuredMessage{
 		Version:     Version,

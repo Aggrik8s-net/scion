@@ -147,9 +147,13 @@ func (m *AgentManager) Message(ctx context.Context, agentID string, message stri
 		cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion", key})
 	}
 
-	// tmux send-keys -t scion "message" Enter
-	cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion", message, "Enter"})
-	cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion", "Enter"})
+	if message == "" {
+		// Empty messages send a bare Enter keypress to trigger confirmations
+		cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion", "Enter"})
+	} else {
+		cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion", message, "Enter"})
+		cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion", "Enter"})
+	}
 
 	// 4. Execute
 	for _, cmd := range cmds {

@@ -145,6 +145,34 @@ func TestNewInstruction(t *testing.T) {
 	}
 }
 
+func TestNewNotification(t *testing.T) {
+	m := NewNotification("agent:worker", "agent:lead", "worker has completed", TypeStateChange)
+	if m.Version != Version {
+		t.Errorf("version = %d, want %d", m.Version, Version)
+	}
+	if m.Type != TypeStateChange {
+		t.Errorf("type = %q, want %q", m.Type, TypeStateChange)
+	}
+	if m.Sender != "agent:worker" {
+		t.Errorf("sender = %q, want %q", m.Sender, "agent:worker")
+	}
+	if m.Recipient != "agent:lead" {
+		t.Errorf("recipient = %q, want %q", m.Recipient, "agent:lead")
+	}
+	if m.Msg != "worker has completed" {
+		t.Errorf("msg = %q, want %q", m.Msg, "worker has completed")
+	}
+	if m.Timestamp == "" {
+		t.Error("timestamp should be set")
+	}
+
+	// Test with input-needed type
+	m2 := NewNotification("agent:helper", "agent:lead", "needs input", TypeInputNeeded)
+	if m2.Type != TypeInputNeeded {
+		t.Errorf("type = %q, want %q", m2.Type, TypeInputNeeded)
+	}
+}
+
 func TestSenderPrefix(t *testing.T) {
 	tests := []struct {
 		input string

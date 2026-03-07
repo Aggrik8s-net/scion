@@ -863,14 +863,14 @@ If a new CLI sends a `StructuredMessage` to an old Hub:
 - ✅ Update sender resolution logic in CLI (Hub mode only)
 - ⏳ Restrict `--all` flag to admin users (deferred — requires admin role checking infrastructure in CLI)
 
-### Phase 2: Delivery and Harness Updates
-- Update `AgentManager.Message()` to format structured messages for tmux delivery
-- Add `FormatMessage` method to `Harness` interface (optional per-harness customization)
-- Strip `recipient` and `id` fields before delivery
-- Implement plain-mode unwrapping at harness delivery (deliver raw `msg` when `plain: true`)
-- Handle empty messages as plain tmux `Enter` keypress
-- Update notification dispatcher to produce `StructuredMessage` with `agent:<slug>` as sender
-- Update system notification prefix to use structured format
+### Phase 2: Delivery and Harness Updates ✅ COMPLETE
+- ✅ Structured message formatting for tmux delivery handled by `FormatForDelivery()` in runtime broker and combo-server dispatcher (Phase 1 wired this end-to-end)
+- ✅ Strip `recipient` field before delivery (handled by `deliveryMessage` struct in `FormatForDelivery()`)
+- ✅ Plain-mode unwrapping at harness delivery (deliver raw `msg` when `plain: true`)
+- ✅ Handle empty messages as plain tmux `Enter` keypress (agent manager and runtime broker)
+- ✅ Update notification dispatcher to produce `StructuredMessage` with `agent:<slug>` as sender and `state-change`/`input-needed` type
+- ✅ Remove legacy `agentNotificationPrefix` — structured message format replaces it
+- ⏳ Add `FormatMessage` method to `Harness` interface (deferred — both Claude and Gemini use the same `FormatForDelivery()` formatting; per-harness customization not yet needed)
 
 ### Phase 3: Logging
 - Add structured logging for message dispatch with dedicated `scion-messages` log

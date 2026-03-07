@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/ptone/scion-agent/pkg/api"
+	"github.com/ptone/scion-agent/pkg/messages"
 	"github.com/ptone/scion-agent/pkg/store"
 )
 
@@ -182,7 +183,7 @@ func (nd *NotificationDispatcher) storeAndDispatch(ctx context.Context, sub *sto
 
 	switch sub.SubscriberType {
 	case store.SubscriberTypeAgent:
-		nd.dispatchToAgent(ctx, sub, notif)
+		nd.dispatchToAgent(ctx, sub, notif, agent.Slug)
 	case store.SubscriberTypeUser:
 		nd.events.PublishNotification(ctx, notif)
 		nd.log.Info("Notification dispatched to user via SSE",
@@ -192,13 +193,10 @@ func (nd *NotificationDispatcher) storeAndDispatch(ctx context.Context, sub *sto
 	}
 }
 
-// agentNotificationPrefix is prepended to notification messages dispatched to
-// subscriber agents, giving the receiving agent context about why it is
-// receiving the message.
-const agentNotificationPrefix = "You are being notified by the system because an agent you manage has reached a notable state. "
-
-// dispatchToAgent sends a notification message to a subscriber agent.
-func (nd *NotificationDispatcher) dispatchToAgent(ctx context.Context, sub *store.NotificationSubscription, notif *store.Notification) {
+// dispatchToAgent sends a notification message to a subscriber agent as a
+// structured message. The sender is the watched agent (agent:<slug>), and
+// the type is state-change or input-needed based on the notification status.
+func (nd *NotificationDispatcher) dispatchToAgent(ctx context.Context, sub *store.NotificationSubscription, notif *store.Notification, watchedSlug string) {
 	subscriber, err := nd.store.GetAgentBySlug(ctx, sub.GroveID, sub.SubscriberID)
 	if err != nil {
 		nd.log.Warn("Subscriber agent not found, skipping dispatch",
@@ -226,8 +224,16 @@ func (nd *NotificationDispatcher) dispatchToAgent(ctx context.Context, sub *stor
 		return
 	}
 
-	prefixedMessage := agentNotificationPrefix + notif.Message
-	if err := dispatcher.DispatchAgentMessage(ctx, subscriber, prefixedMessage, false, nil); err != nil {
+	// Build structured message for the notification
+	msgType := notificationMessageType(notif.Status)
+	structuredMsg := messages.NewNotification(
+		"agent:"+watchedSlug,
+		"agent:"+subscriber.Slug,
+		notif.Message,
+		msgType,
+	)
+
+	if err := dispatcher.DispatchAgentMessage(ctx, subscriber, notif.Message, false, structuredMsg); err != nil {
 		nd.log.Error("Failed to dispatch notification to agent",
 			"subscriberID", sub.SubscriberID, "error", err)
 	} else {
@@ -239,6 +245,14 @@ func (nd *NotificationDispatcher) dispatchToAgent(ctx context.Context, sub *stor
 	if err := nd.store.MarkNotificationDispatched(ctx, notif.ID); err != nil {
 		nd.log.Error("Failed to mark notification dispatched", "notificationID", notif.ID, "error", err)
 	}
+}
+
+// notificationMessageType returns the structured message type for a notification status.
+func notificationMessageType(status string) string {
+	if strings.EqualFold(status, "WAITING_FOR_INPUT") {
+		return messages.TypeInputNeeded
+	}
+	return messages.TypeStateChange
 }
 
 // formatNotificationMessage formats a notification message based on agent state and status.
