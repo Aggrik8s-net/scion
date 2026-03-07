@@ -16,6 +16,7 @@ package daemon
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -23,8 +24,102 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestPIDFileName(t *testing.T) {
+	assert.Equal(t, "server.pid", PIDFileName("server"))
+	assert.Equal(t, "broker.pid", PIDFileName("broker"))
+}
+
+func TestLogFileName(t *testing.T) {
+	assert.Equal(t, "server.log", LogFileName("server"))
+	assert.Equal(t, "broker.log", LogFileName("broker"))
+}
+
+func TestComponentIsolation(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write PIDs for different components
+	err := WritePIDComponent("server", dir, 11111)
+	require.NoError(t, err)
+	err = WritePIDComponent("broker", dir, 22222)
+	require.NoError(t, err)
+
+	// Read back and verify isolation
+	pid, err := ReadPIDComponent("server", dir)
+	assert.NoError(t, err)
+	assert.Equal(t, 11111, pid)
+
+	pid, err = ReadPIDComponent("broker", dir)
+	assert.NoError(t, err)
+	assert.Equal(t, 22222, pid)
+
+	// Verify file paths
+	assert.FileExists(t, filepath.Join(dir, "server.pid"))
+	assert.FileExists(t, filepath.Join(dir, "broker.pid"))
+
+	// Remove one shouldn't affect the other
+	err = RemovePIDComponent("server", dir)
+	assert.NoError(t, err)
+
+	_, err = ReadPIDComponent("server", dir)
+	assert.Error(t, err)
+
+	pid, err = ReadPIDComponent("broker", dir)
+	assert.NoError(t, err)
+	assert.Equal(t, 22222, pid)
+}
+
+func TestGetLogPathComponent(t *testing.T) {
+	assert.Contains(t, GetLogPathComponent("server", "/tmp/test"), "server.log")
+	assert.Contains(t, GetLogPathComponent("broker", "/tmp/test"), "broker.log")
+}
+
+func TestGetPIDPathComponent(t *testing.T) {
+	assert.Contains(t, GetPIDPathComponent("server", "/tmp/test"), "server.pid")
+	assert.Contains(t, GetPIDPathComponent("broker", "/tmp/test"), "broker.pid")
+}
+
+func TestStatusComponent_NoPIDFile(t *testing.T) {
+	dir := t.TempDir()
+
+	running, _, err := StatusComponent("server", dir)
+	assert.False(t, running)
+	assert.ErrorIs(t, err, ErrNotRunning)
+}
+
+func TestStatusComponent_StalePID(t *testing.T) {
+	dir := t.TempDir()
+
+	err := WritePIDComponent("server", dir, 99999999)
+	require.NoError(t, err)
+
+	running, _, err := StatusComponent("server", dir)
+	assert.False(t, running)
+	assert.ErrorIs(t, err, ErrNotRunning)
+}
+
+func TestWaitForExitComponent_AlreadyStopped(t *testing.T) {
+	dir := t.TempDir()
+
+	err := WaitForExitComponent("server", dir, 1*time.Second)
+	assert.NoError(t, err)
+}
+
+func TestWaitForExitComponent_Timeout(t *testing.T) {
+	dir := t.TempDir()
+
+	err := WritePIDComponent("server", dir, os.Getpid())
+	require.NoError(t, err)
+
+	err = WaitForExitComponent("server", dir, 500*time.Millisecond)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "did not exit")
+
+	_ = RemovePIDComponent("server", dir)
+}
+
+// --- Legacy API backward compatibility tests ---
+
 func TestWaitForExit_AlreadyStopped(t *testing.T) {
-	// Use a temp dir with no PID file — daemon is not running
 	dir := t.TempDir()
 
 	err := WaitForExit(dir, 1*time.Second)
@@ -32,10 +127,8 @@ func TestWaitForExit_AlreadyStopped(t *testing.T) {
 }
 
 func TestWaitForExit_StalePIDFile(t *testing.T) {
-	// Write a PID file with a PID that doesn't correspond to a running process
 	dir := t.TempDir()
 
-	// PID 99999999 is extremely unlikely to exist
 	err := WritePID(dir, 99999999)
 	require.NoError(t, err)
 
@@ -44,7 +137,6 @@ func TestWaitForExit_StalePIDFile(t *testing.T) {
 }
 
 func TestWaitForExit_Timeout(t *testing.T) {
-	// Write our own PID — this process is always running
 	dir := t.TempDir()
 
 	err := WritePID(dir, os.Getpid())
@@ -54,7 +146,6 @@ func TestWaitForExit_Timeout(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "did not exit")
 
-	// Clean up the PID file
 	_ = RemovePID(dir)
 }
 
@@ -109,4 +200,26 @@ func TestGetLogPath(t *testing.T) {
 func TestGetPIDPath(t *testing.T) {
 	path := GetPIDPath("/tmp/test")
 	assert.Contains(t, path, "broker.pid")
+}
+
+func TestLegacyDelegatesToBrokerComponent(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write via legacy API
+	err := WritePID(dir, 54321)
+	require.NoError(t, err)
+
+	// Read via component API with "broker"
+	pid, err := ReadPIDComponent("broker", dir)
+	assert.NoError(t, err)
+	assert.Equal(t, 54321, pid)
+
+	// Write via component API
+	err = WritePIDComponent("broker", dir, 99999)
+	require.NoError(t, err)
+
+	// Read via legacy API
+	pid, err = ReadPID(dir)
+	assert.NoError(t, err)
+	assert.Equal(t, 99999, pid)
 }

@@ -28,8 +28,10 @@ import (
 
 const (
 	// PIDFile is the default name for the broker PID file.
+	// Deprecated: Use PIDFileName instead.
 	PIDFile = "broker.pid"
 	// LogFile is the default name for the broker log file.
+	// Deprecated: Use LogFileName instead.
 	LogFile = "broker.log"
 )
 
@@ -40,13 +42,20 @@ var (
 	ErrNotRunning = errors.New("daemon is not running")
 )
 
-// Start launches the broker as a background daemon.
-// It creates a new process that runs independently of the parent.
-// The PID is written to the PID file in globalDir.
-// Stdout/stderr are redirected to the log file in globalDir.
-func Start(executable string, args []string, globalDir string) error {
-	// Check if already running
-	running, _, err := Status(globalDir)
+// PIDFileName returns the PID filename for the given component (e.g. "server" -> "server.pid").
+func PIDFileName(component string) string {
+	return component + ".pid"
+}
+
+// LogFileName returns the log filename for the given component (e.g. "server" -> "server.log").
+func LogFileName(component string) string {
+	return component + ".log"
+}
+
+// StartComponent launches a component as a background daemon using the given component name
+// for PID/log file naming.
+func StartComponent(component, executable string, args []string, globalDir string) error {
+	running, _, err := StatusComponent(component, globalDir)
 	if err != nil && !errors.Is(err, ErrNotRunning) {
 		return fmt.Errorf("failed to check status: %w", err)
 	}
@@ -54,40 +63,31 @@ func Start(executable string, args []string, globalDir string) error {
 		return ErrAlreadyRunning
 	}
 
-	// Prepare log file
-	logPath := filepath.Join(globalDir, LogFile)
+	logPath := filepath.Join(globalDir, LogFileName(component))
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
 
-	// Create the command
 	cmd := exec.Command(executable, args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.Dir = globalDir
-
-	// Detach from parent process group
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
 	}
 
-	// Start the process
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		return fmt.Errorf("failed to start daemon: %w", err)
 	}
 
-	// Write PID file
-	if err := WritePID(globalDir, cmd.Process.Pid); err != nil {
-		// Try to kill the process if we can't write the PID file
+	if err := WritePIDComponent(component, globalDir, cmd.Process.Pid); err != nil {
 		_ = cmd.Process.Kill()
 		logFile.Close()
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
 
-	// Don't wait for the process - it's a daemon
-	// The logFile will stay open in the child process
 	go func() {
 		_ = cmd.Wait()
 		logFile.Close()
@@ -96,39 +96,34 @@ func Start(executable string, args []string, globalDir string) error {
 	return nil
 }
 
-// Stop terminates a running daemon by reading its PID and sending SIGTERM.
-func Stop(globalDir string) error {
-	pid, err := ReadPID(globalDir)
+// StopComponent terminates a running daemon by reading its PID and sending SIGTERM.
+func StopComponent(component, globalDir string) error {
+	pid, err := ReadPIDComponent(component, globalDir)
 	if err != nil {
 		return ErrNotRunning
 	}
 
-	// Find the process
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		_ = RemovePID(globalDir)
+		_ = RemovePIDComponent(component, globalDir)
 		return ErrNotRunning
 	}
 
-	// Send SIGTERM for graceful shutdown
 	if err := process.Signal(syscall.SIGTERM); err != nil {
-		// Process might already be dead
-		_ = RemovePID(globalDir)
+		_ = RemovePIDComponent(component, globalDir)
 		return ErrNotRunning
 	}
 
-	// Remove PID file after stopping
-	if err := RemovePID(globalDir); err != nil {
+	if err := RemovePIDComponent(component, globalDir); err != nil {
 		return fmt.Errorf("failed to remove PID file: %w", err)
 	}
 
 	return nil
 }
 
-// Status checks if the daemon is running.
-// Returns (running, pid, error).
-func Status(globalDir string) (bool, int, error) {
-	pid, err := ReadPID(globalDir)
+// StatusComponent checks if a component daemon is running.
+func StatusComponent(component, globalDir string) (bool, int, error) {
+	pid, err := ReadPIDComponent(component, globalDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return false, 0, ErrNotRunning
@@ -136,32 +131,29 @@ func Status(globalDir string) (bool, int, error) {
 		return false, 0, err
 	}
 
-	// Check if process is running
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		_ = RemovePID(globalDir)
+		_ = RemovePIDComponent(component, globalDir)
 		return false, 0, ErrNotRunning
 	}
 
-	// On Unix, FindProcess always succeeds, so we need to send signal 0 to check
 	if err := process.Signal(syscall.Signal(0)); err != nil {
-		// Process is not running, clean up stale PID file
-		_ = RemovePID(globalDir)
+		_ = RemovePIDComponent(component, globalDir)
 		return false, pid, ErrNotRunning
 	}
 
 	return true, pid, nil
 }
 
-// WritePID writes the PID to the PID file in globalDir.
-func WritePID(globalDir string, pid int) error {
-	pidPath := filepath.Join(globalDir, PIDFile)
+// WritePIDComponent writes the PID to the component-specific PID file.
+func WritePIDComponent(component, globalDir string, pid int) error {
+	pidPath := filepath.Join(globalDir, PIDFileName(component))
 	return os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0644)
 }
 
-// ReadPID reads the PID from the PID file in globalDir.
-func ReadPID(globalDir string) (int, error) {
-	pidPath := filepath.Join(globalDir, PIDFile)
+// ReadPIDComponent reads the PID from the component-specific PID file.
+func ReadPIDComponent(component, globalDir string) (int, error) {
+	pidPath := filepath.Join(globalDir, PIDFileName(component))
 	data, err := os.ReadFile(pidPath)
 	if err != nil {
 		return 0, err
@@ -175,19 +167,17 @@ func ReadPID(globalDir string) (int, error) {
 	return pid, nil
 }
 
-// RemovePID removes the PID file from globalDir.
-func RemovePID(globalDir string) error {
-	pidPath := filepath.Join(globalDir, PIDFile)
+// RemovePIDComponent removes the component-specific PID file.
+func RemovePIDComponent(component, globalDir string) error {
+	pidPath := filepath.Join(globalDir, PIDFileName(component))
 	return os.Remove(pidPath)
 }
 
-// WaitForExit polls until the daemon process has exited or the timeout is reached.
-// This is useful after calling Stop to ensure the process is fully terminated
-// before starting a new one.
-func WaitForExit(globalDir string, timeout time.Duration) error {
+// WaitForExitComponent polls until the daemon process has exited or the timeout is reached.
+func WaitForExitComponent(component, globalDir string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		running, _, _ := Status(globalDir)
+		running, _, _ := StatusComponent(component, globalDir)
 		if !running {
 			return nil
 		}
@@ -196,12 +186,59 @@ func WaitForExit(globalDir string, timeout time.Duration) error {
 	return fmt.Errorf("daemon process did not exit within %s", timeout)
 }
 
-// GetLogPath returns the path to the daemon log file.
-func GetLogPath(globalDir string) string {
-	return filepath.Join(globalDir, LogFile)
+// GetLogPathComponent returns the path to the component-specific log file.
+func GetLogPathComponent(component, globalDir string) string {
+	return filepath.Join(globalDir, LogFileName(component))
 }
 
-// GetPIDPath returns the path to the daemon PID file.
+// GetPIDPathComponent returns the path to the component-specific PID file.
+func GetPIDPathComponent(component, globalDir string) string {
+	return filepath.Join(globalDir, PIDFileName(component))
+}
+
+// --- Legacy broker-specific functions (delegate to component-based API) ---
+
+// Start launches the broker as a background daemon.
+func Start(executable string, args []string, globalDir string) error {
+	return StartComponent("broker", executable, args, globalDir)
+}
+
+// Stop terminates a running broker daemon.
+func Stop(globalDir string) error {
+	return StopComponent("broker", globalDir)
+}
+
+// Status checks if the broker daemon is running.
+func Status(globalDir string) (bool, int, error) {
+	return StatusComponent("broker", globalDir)
+}
+
+// WritePID writes the PID to the broker PID file.
+func WritePID(globalDir string, pid int) error {
+	return WritePIDComponent("broker", globalDir, pid)
+}
+
+// ReadPID reads the PID from the broker PID file.
+func ReadPID(globalDir string) (int, error) {
+	return ReadPIDComponent("broker", globalDir)
+}
+
+// RemovePID removes the broker PID file.
+func RemovePID(globalDir string) error {
+	return RemovePIDComponent("broker", globalDir)
+}
+
+// WaitForExit polls until the broker daemon process has exited or the timeout is reached.
+func WaitForExit(globalDir string, timeout time.Duration) error {
+	return WaitForExitComponent("broker", globalDir, timeout)
+}
+
+// GetLogPath returns the path to the broker log file.
+func GetLogPath(globalDir string) string {
+	return GetLogPathComponent("broker", globalDir)
+}
+
+// GetPIDPath returns the path to the broker PID file.
 func GetPIDPath(globalDir string) string {
-	return filepath.Join(globalDir, PIDFile)
+	return GetPIDPathComponent("broker", globalDir)
 }
