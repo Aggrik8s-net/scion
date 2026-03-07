@@ -243,6 +243,7 @@ func TestProtoLogToCloudEntry(t *testing.T) {
 	res := &resourcepb.Resource{
 		Attributes: []*commonpb.KeyValue{
 			{Key: "service.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "test"}}},
+			{Key: "gcp.project_id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "deploy-demo-test"}}},
 		},
 	}
 
@@ -267,6 +268,12 @@ func TestProtoLogToCloudEntry(t *testing.T) {
 
 	if _, ok := payload["trace_id"]; !ok {
 		t.Error("Expected trace_id in payload")
+	}
+	if got, want := entry.Trace, "projects/deploy-demo-test/traces/0102030405060708090a0b0c0d0e0f10"; got != want {
+		t.Errorf("Trace = %q, want %q", got, want)
+	}
+	if got, want := entry.Labels["appengine.googleapis.com/trace_id"], "0102030405060708090a0b0c0d0e0f10"; got != want {
+		t.Errorf("Labels[appengine.googleapis.com/trace_id] = %q, want %q", got, want)
 	}
 
 	if entry.Labels["service.name"] != "test" {

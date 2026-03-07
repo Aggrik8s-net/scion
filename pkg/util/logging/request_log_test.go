@@ -300,10 +300,11 @@ func TestRequestLogMiddleware_TraceIDFromHeader(t *testing.T) {
 	headers := []struct {
 		name  string
 		value string
+		want  string
 	}{
-		{"X-Cloud-Trace-Context", "abc123/456;o=1"},
-		{"traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"},
-		{"X-Trace-ID", "custom-trace-id"},
+		{"X-Cloud-Trace-Context", "4bf92f3577b34da6a3ce929d0e0e4736/456;o=1", "4bf92f3577b34da6a3ce929d0e0e4736"},
+		{"traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "4bf92f3577b34da6a3ce929d0e0e4736"},
+		{"X-Trace-ID", "custom-trace-id", "custom-trace-id"},
 	}
 
 	for _, tt := range headers {
@@ -324,8 +325,8 @@ func TestRequestLogMiddleware_TraceIDFromHeader(t *testing.T) {
 			var entry map[string]any
 			json.Unmarshal(buf.Bytes(), &entry)
 
-			if entry["trace_id"] != tt.value {
-				t.Errorf("expected trace_id=%s, got %v", tt.value, entry["trace_id"])
+			if entry["trace_id"] != tt.want {
+				t.Errorf("expected trace_id=%s, got %v", tt.want, entry["trace_id"])
 			}
 		})
 	}

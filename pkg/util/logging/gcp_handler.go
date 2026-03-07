@@ -46,6 +46,7 @@ type GCPHandler struct {
 	handler   slog.Handler
 	component string
 	hostname  string
+	projectID string
 	preAttrs  []slog.Attr // tracked for label promotion
 }
 
@@ -57,6 +58,7 @@ func NewGCPHandler(w io.Writer, opts *slog.HandlerOptions, component string) *GC
 
 	// Hostname for host_logs as requested in design
 	hostname, _ := os.Hostname()
+	projectID := resolveProjectID()
 
 	originalReplace := opts.ReplaceAttr
 	opts.ReplaceAttr = func(groups []string, a slog.Attr) slog.Attr {
@@ -77,7 +79,11 @@ func NewGCPHandler(w io.Writer, opts *slog.HandlerOptions, component string) *GC
 		case slog.TimeKey:
 			return slog.Attr{Key: GCPKeyTimestamp, Value: a.Value}
 		case AttrTraceID:
-			return slog.Attr{Key: GCPKeyTrace, Value: a.Value}
+			traceID := NormalizeTraceID(a.Value.String())
+			if traceID == "" {
+				return slog.Attr{}
+			}
+			return slog.String(GCPKeyTrace, FormatCloudTraceResource(projectID, traceID))
 		}
 		return a
 	}
@@ -89,6 +95,7 @@ func NewGCPHandler(w io.Writer, opts *slog.HandlerOptions, component string) *GC
 		handler:   jsonHandler,
 		component: component,
 		hostname:  hostname,
+		projectID: projectID,
 	}
 }
 
@@ -112,6 +119,9 @@ func (h *GCPHandler) Handle(ctx context.Context, r slog.Record) error {
 		promoteAttrToLabels(labels, a)
 		return true
 	})
+	if traceID := extractTraceIDFromAttrs(h.preAttrs, r); traceID != "" {
+		labels[gcpTraceIDLabelKey] = traceID
+	}
 	r.AddAttrs(slog.Any(GCPKeyLabels, labels))
 
 	// Add source location if requested or by default
@@ -136,6 +146,7 @@ func (h *GCPHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		handler:   h.handler.WithAttrs(attrs),
 		component: h.component,
 		hostname:  h.hostname,
+		projectID: h.projectID,
 		preAttrs:  newPreAttrs,
 	}
 }
@@ -145,6 +156,23 @@ func (h *GCPHandler) WithGroup(name string) slog.Handler {
 		handler:   h.handler.WithGroup(name),
 		component: h.component,
 		hostname:  h.hostname,
+		projectID: h.projectID,
 		preAttrs:  h.preAttrs,
 	}
+}
+
+func extractTraceIDFromAttrs(preAttrs []slog.Attr, r slog.Record) string {
+	var traceID string
+	for _, a := range preAttrs {
+		if a.Key == AttrTraceID {
+			traceID = NormalizeTraceID(a.Value.String())
+		}
+	}
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Key == AttrTraceID {
+			traceID = NormalizeTraceID(a.Value.String())
+		}
+		return true
+	})
+	return traceID
 }

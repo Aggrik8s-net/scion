@@ -107,11 +107,11 @@ type ServerConfig struct {
 // DefaultServerConfig returns the default server configuration.
 func DefaultServerConfig() ServerConfig {
 	return ServerConfig{
-		Port:         9810,
-		Host:         "0.0.0.0",
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
-		CORSEnabled:  true,
+		Port:               9810,
+		Host:               "0.0.0.0",
+		ReadTimeout:        30 * time.Second,
+		WriteTimeout:       60 * time.Second,
+		CORSEnabled:        true,
 		CORSAllowedOrigins: []string{"*"},
 		CORSAllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		CORSAllowedHeaders: []string{
@@ -123,7 +123,7 @@ func DefaultServerConfig() ServerConfig {
 		},
 		CORSMaxAge:       3600,
 		StalledThreshold: 5 * time.Minute,
-		BrokerAuthConfig:   DefaultBrokerAuthConfig(),
+		BrokerAuthConfig: DefaultBrokerAuthConfig(),
 	}
 }
 
@@ -239,8 +239,8 @@ type RemoteCreateAgentRequest struct {
 	// ResolvedSecrets contains type-aware secrets resolved by the Hub.
 	// These are projected into the agent container based on their type.
 	ResolvedSecrets []ResolvedSecret `json:"resolvedSecrets,omitempty"`
-	HubEndpoint string             `json:"hubEndpoint,omitempty"`
-	AgentToken  string             `json:"agentToken,omitempty"`
+	HubEndpoint     string           `json:"hubEndpoint,omitempty"`
+	AgentToken      string           `json:"agentToken,omitempty"`
 	// CreatorName is the human-readable identity of who created this agent.
 	// Injected as the SCION_CREATOR environment variable in the agent container.
 	CreatorName string `json:"creatorName,omitempty"`
@@ -281,26 +281,26 @@ type RemoteCreateAgentRequest struct {
 
 // ResolvedSecret represents a secret resolved by the Hub for projection into an agent container.
 type ResolvedSecret struct {
-	Name   string `json:"name"`             // Secret key name
-	Type   string `json:"type"`             // environment, variable, file
-	Target string `json:"target"`           // Projection target
-	Value  string `json:"value"`            // Decrypted secret value
-	Source string `json:"source"`           // Scope that provided this secret
-	Ref    string `json:"ref,omitempty"`    // External secret reference (e.g., "gcpsm:projects/123/secrets/name")
+	Name   string `json:"name"`          // Secret key name
+	Type   string `json:"type"`          // environment, variable, file
+	Target string `json:"target"`        // Projection target
+	Value  string `json:"value"`         // Decrypted secret value
+	Source string `json:"source"`        // Scope that provided this secret
+	Ref    string `json:"ref,omitempty"` // External secret reference (e.g., "gcpsm:projects/123/secrets/name")
 }
 
 // RemoteAgentConfig contains agent configuration for remote creation.
 type RemoteAgentConfig struct {
-	Template    string   `json:"template,omitempty"`
-	Image       string   `json:"image,omitempty"`
-	HomeDir     string   `json:"homeDir,omitempty"`
-	Workspace   string   `json:"workspace,omitempty"`
-	Env         []string `json:"env,omitempty"`
-	Task        string   `json:"task,omitempty"`
-	CommandArgs []string `json:"commandArgs,omitempty"`
-	HarnessConfig     string   `json:"harnessConfig,omitempty"`  // Resolved harness config name for env-gather
-	HarnessAuth       string   `json:"harnessAuth,omitempty"`   // Late-binding override for auth_selected_type
-	Profile     string   `json:"profile,omitempty"`   // Settings profile for the runtime broker
+	Template      string   `json:"template,omitempty"`
+	Image         string   `json:"image,omitempty"`
+	HomeDir       string   `json:"homeDir,omitempty"`
+	Workspace     string   `json:"workspace,omitempty"`
+	Env           []string `json:"env,omitempty"`
+	Task          string   `json:"task,omitempty"`
+	CommandArgs   []string `json:"commandArgs,omitempty"`
+	HarnessConfig string   `json:"harnessConfig,omitempty"` // Resolved harness config name for env-gather
+	HarnessAuth   string   `json:"harnessAuth,omitempty"`   // Late-binding override for auth_selected_type
+	Profile       string   `json:"profile,omitempty"`       // Settings profile for the runtime broker
 
 	// TemplateID is the Hub template ID for cache lookup on the Runtime Broker.
 	// When provided, the Runtime Broker can use this to fetch the template
@@ -328,63 +328,63 @@ type RemoteAgentResponse struct {
 // SecretKeyInfo provides metadata about a required secret key.
 type SecretKeyInfo struct {
 	Description string `json:"description,omitempty"`
-	Source      string `json:"source"`                // "harness", "template", "settings"
-	Type        string `json:"type,omitempty"`         // "environment" (default), "variable", "file"
+	Source      string `json:"source"`         // "harness", "template", "settings"
+	Type        string `json:"type,omitempty"` // "environment" (default), "variable", "file"
 }
 
 type RemoteEnvRequirementsResponse struct {
-	AgentID    string                  `json:"agentId"`
-	Required   []string                `json:"required"`
-	HubHas     []string                `json:"hubHas"`
-	BrokerHas  []string                `json:"brokerHas"`
-	Needs      []string                `json:"needs"`
+	AgentID    string                   `json:"agentId"`
+	Required   []string                 `json:"required"`
+	HubHas     []string                 `json:"hubHas"`
+	BrokerHas  []string                 `json:"brokerHas"`
+	Needs      []string                 `json:"needs"`
 	SecretInfo map[string]SecretKeyInfo `json:"secretInfo,omitempty"`
 }
 
 // RemoteAgentInfo contains agent information from a remote runtime broker.
 type RemoteAgentInfo struct {
-	ID              string `json:"id"`              // Hub UUID
-	Slug            string `json:"slug"`            // URL-safe identifier
-	ContainerID     string `json:"containerId"`     // Runtime container ID
+	ID              string `json:"id"`          // Hub UUID
+	Slug            string `json:"slug"`        // URL-safe identifier
+	ContainerID     string `json:"containerId"` // Runtime container ID
 	Name            string `json:"name"`
 	Template        string `json:"template,omitempty"`
 	HarnessConfig   string `json:"harnessConfig,omitempty"`
 	HarnessAuth     string `json:"harnessAuth,omitempty"`
-	Image           string `json:"image,omitempty"`           // Resolved container image
+	Image           string `json:"image,omitempty"` // Resolved container image
 	Runtime         string `json:"runtime,omitempty"`
-	Phase           string `json:"phase,omitempty"`           // Lifecycle phase
-	Activity        string `json:"activity,omitempty"`        // Runtime activity
-	Status          string `json:"status"`                    // Legacy: kept for backward compat with older brokers
+	Phase           string `json:"phase,omitempty"`    // Lifecycle phase
+	Activity        string `json:"activity,omitempty"` // Runtime activity
+	Status          string `json:"status"`             // Legacy: kept for backward compat with older brokers
 	ContainerStatus string `json:"containerStatus,omitempty"`
 }
 
 // Server is the Hub API HTTP server.
 type Server struct {
-	config            ServerConfig
-	store             store.Store
-	httpServer        *http.Server
-	mux               *http.ServeMux
-	mu                sync.RWMutex
-	startTime         time.Time
-	dispatcher        AgentDispatcher     // Optional dispatcher for co-located runtime broker
-	storage           storage.Storage     // Optional storage backend for templates
-	secretBackend     secret.SecretBackend // Optional secret backend
-	agentTokenService *AgentTokenService  // Agent JWT token service
-	userTokenService  *UserTokenService   // User JWT token service
-	apiKeyService     *APIKeyService      // API key service
-	oauthService      *OAuthService       // OAuth service for CLI authentication
-	authConfig        AuthConfig          // Unified auth configuration
-	brokerAuthService   *BrokerAuthService    // Broker HMAC authentication service
-	auditLogger       AuditLogger         // Audit logger for security events
-	metrics           MetricsRecorder     // Metrics recorder for broker auth
-	controlChannel            *ControlChannelManager // WebSocket control channel for runtime brokers
-	authzService              *AuthzService       // Authorization service for policy evaluation
-	events                    EventPublisher      // Event publisher for real-time SSE updates
-	notificationDispatcher    *NotificationDispatcher // Notification dispatcher for agent status events
-	maintenance               *MaintenanceState   // Runtime maintenance mode state
-	embeddedBrokerID          string              // Broker ID when running in hub+broker combo mode
-	scheduler                 *Scheduler          // Unified scheduler for recurring tasks
-	cleanupOnce               sync.Once           // Ensures CleanupResources runs only once
+	config                 ServerConfig
+	store                  store.Store
+	httpServer             *http.Server
+	mux                    *http.ServeMux
+	mu                     sync.RWMutex
+	startTime              time.Time
+	dispatcher             AgentDispatcher         // Optional dispatcher for co-located runtime broker
+	storage                storage.Storage         // Optional storage backend for templates
+	secretBackend          secret.SecretBackend    // Optional secret backend
+	agentTokenService      *AgentTokenService      // Agent JWT token service
+	userTokenService       *UserTokenService       // User JWT token service
+	apiKeyService          *APIKeyService          // API key service
+	oauthService           *OAuthService           // OAuth service for CLI authentication
+	authConfig             AuthConfig              // Unified auth configuration
+	brokerAuthService      *BrokerAuthService      // Broker HMAC authentication service
+	auditLogger            AuditLogger             // Audit logger for security events
+	metrics                MetricsRecorder         // Metrics recorder for broker auth
+	controlChannel         *ControlChannelManager  // WebSocket control channel for runtime brokers
+	authzService           *AuthzService           // Authorization service for policy evaluation
+	events                 EventPublisher          // Event publisher for real-time SSE updates
+	notificationDispatcher *NotificationDispatcher // Notification dispatcher for agent status events
+	maintenance            *MaintenanceState       // Runtime maintenance mode state
+	embeddedBrokerID       string                  // Broker ID when running in hub+broker combo mode
+	scheduler              *Scheduler              // Unified scheduler for recurring tasks
+	cleanupOnce            sync.Once               // Ensures CleanupResources runs only once
 
 	logQueryService *LogQueryService // Cloud Logging query service (nil = disabled)
 
@@ -1357,12 +1357,8 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		start := time.Now()
 		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
-		// Extract contextual metadata for logging
-		// In the future, this could extract trace IDs from headers
-		traceID := r.Header.Get("X-Cloud-Trace-Context")
-		if traceID == "" {
-			traceID = r.Header.Get("X-Trace-ID")
-		}
+		// Extract contextual metadata for logging.
+		traceID := logging.ExtractTraceIDFromHeaders(r)
 
 		attrs := []slog.Attr{
 			slog.String("method", r.Method),

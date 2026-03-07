@@ -266,16 +266,28 @@ func protoLogToCloudEntry(lr *logspb.LogRecord, res *resourcepb.Resource) loggin
 	}
 
 	labels := make(map[string]string)
+	projectID := ""
 	if res != nil {
 		for _, kv := range res.Attributes {
 			if kv.Value != nil {
-				labels[kv.Key] = anyValueToString(kv.Value)
+				val := anyValueToString(kv.Value)
+				labels[kv.Key] = val
+				if kv.Key == "gcp.project_id" && val != "" {
+					projectID = val
+				}
 			}
 		}
 	}
 
 	if len(lr.TraceId) == 16 {
-		payload["trace_id"] = hex.EncodeToString(lr.TraceId)
+		traceID := hex.EncodeToString(lr.TraceId)
+		payload["trace_id"] = traceID
+		if projectID != "" {
+			entry.Trace = "projects/" + projectID + "/traces/" + traceID
+		} else {
+			entry.Trace = traceID
+		}
+		labels["appengine.googleapis.com/trace_id"] = traceID
 	}
 	if len(lr.SpanId) == 8 {
 		payload["span_id"] = hex.EncodeToString(lr.SpanId)

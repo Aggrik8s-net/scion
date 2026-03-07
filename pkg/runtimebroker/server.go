@@ -1185,11 +1185,8 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		start := time.Now()
 		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
-		// Extract contextual metadata for logging
-		traceID := r.Header.Get("X-Cloud-Trace-Context")
-		if traceID == "" {
-			traceID = r.Header.Get("X-Trace-ID")
-		}
+		// Extract contextual metadata for logging.
+		traceID := logging.ExtractTraceIDFromHeaders(r)
 
 		attrs := []slog.Attr{
 			slog.String("method", r.Method),

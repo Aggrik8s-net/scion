@@ -43,7 +43,7 @@ func TestGCPHandler(t *testing.T) {
 
 	labels := data[GCPKeyLabels].(map[string]interface{})
 	assert.Equal(t, "test-component", labels["component"])
-	
+
 	hostname, _ := os.Hostname()
 	if hostname != "" {
 		assert.Equal(t, hostname, labels["hostname"])
@@ -123,6 +123,27 @@ func TestGCPHandler_LabelsFromWithAttrs(t *testing.T) {
 	labels := data[GCPKeyLabels].(map[string]interface{})
 	assert.Equal(t, "pre-agent", labels[AttrAgentID])
 	assert.Equal(t, "pre-grove", labels[AttrGroveID])
+}
+
+func TestGCPHandler_TraceCorrelationFields(t *testing.T) {
+	t.Setenv(EnvGCPProjectID, "deploy-demo-test")
+
+	var buf bytes.Buffer
+	handler := NewGCPHandler(&buf, nil, "test-component")
+	logger := slog.New(handler)
+
+	logger.Info("trace log",
+		AttrTraceID, "4bf92f3577b34da6a3ce929d0e0e4736/1;o=1",
+	)
+
+	var data map[string]interface{}
+	err := json.Unmarshal(buf.Bytes(), &data)
+	assert.NoError(t, err)
+
+	assert.Equal(t, "projects/deploy-demo-test/traces/4bf92f3577b34da6a3ce929d0e0e4736", data[GCPKeyTrace])
+
+	labels := data[GCPKeyLabels].(map[string]interface{})
+	assert.Equal(t, "4bf92f3577b34da6a3ce929d0e0e4736", labels[gcpTraceIDLabelKey])
 }
 
 func TestSubsystemLogger(t *testing.T) {

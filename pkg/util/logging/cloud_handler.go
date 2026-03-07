@@ -31,9 +31,9 @@ import (
 
 // Environment variable names for Cloud Logging configuration.
 const (
-	EnvCloudLogging      = "SCION_CLOUD_LOGGING"
-	EnvCloudLoggingLogID = "SCION_CLOUD_LOGGING_LOG_ID"
-	EnvGCPProjectID      = "SCION_GCP_PROJECT_ID"
+	EnvCloudLogging       = "SCION_CLOUD_LOGGING"
+	EnvCloudLoggingLogID  = "SCION_CLOUD_LOGGING_LOG_ID"
+	EnvGCPProjectID       = "SCION_GCP_PROJECT_ID"
 	EnvGoogleCloudProject = "GOOGLE_CLOUD_PROJECT"
 )
 
@@ -55,6 +55,7 @@ type CloudHandler struct {
 	level     slog.Level
 	component string
 	hostname  string
+	projectID string
 	attrs     []slog.Attr
 	groups    []string
 }
@@ -90,6 +91,7 @@ func NewCloudHandler(ctx context.Context, config CloudLoggingConfig, level slog.
 		level:     level,
 		component: config.Component,
 		hostname:  hostname,
+		projectID: projectID,
 	}
 
 	cleanup := func() {
@@ -170,6 +172,13 @@ func (h *CloudHandler) Handle(_ context.Context, r slog.Record) error {
 		Labels:         labels,
 		Timestamp:      r.Time,
 	}
+	if traceID, ok := payload[AttrTraceID].(string); ok {
+		if normalized := NormalizeTraceID(traceID); normalized != "" {
+			payload[AttrTraceID] = normalized
+			entry.Trace = FormatCloudTraceResource(h.projectID, normalized)
+			entry.Labels[gcpTraceIDLabelKey] = normalized
+		}
+	}
 
 	// Promote httpRequest to top-level entry field if present.
 	if reqMap, ok := payload["httpRequest"].(map[string]any); ok {
@@ -193,6 +202,7 @@ func (h *CloudHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		level:     h.level,
 		component: h.component,
 		hostname:  h.hostname,
+		projectID: h.projectID,
 		attrs:     newAttrs,
 		groups:    h.groups,
 	}
@@ -209,6 +219,7 @@ func (h *CloudHandler) WithGroup(name string) slog.Handler {
 		level:     h.level,
 		component: h.component,
 		hostname:  h.hostname,
+		projectID: h.projectID,
 		attrs:     h.attrs,
 		groups:    newGroups,
 	}
@@ -231,6 +242,7 @@ func NewCloudHandlerFromClient(client *gcplog.Client, logID, component string, l
 		level:     level,
 		component: component,
 		hostname:  hostname,
+		projectID: resolveProjectID(),
 	}
 }
 

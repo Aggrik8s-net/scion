@@ -271,14 +271,8 @@ func RequestLogMiddleware(logger *slog.Logger, component string, patterns []Path
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 
-			// Extract trace ID from headers
-			traceID := r.Header.Get("X-Cloud-Trace-Context")
-			if traceID == "" {
-				traceID = r.Header.Get("traceparent")
-			}
-			if traceID == "" {
-				traceID = r.Header.Get("X-Trace-ID")
-			}
+			// Extract and normalize trace ID from headers.
+			traceID := ExtractTraceIDFromHeaders(r)
 
 			// Generate request ID if no trace header present
 			requestID := uuid.New().String()
