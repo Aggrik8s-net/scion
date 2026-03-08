@@ -2,4 +2,5 @@ harness: codex
 image: us-central1-docker.pkg.dev/ptone-misc/public-docker/scion-codex:latest
 user: scion
 env:
+  # TODO: notify hook is disabled pending full hook support in Codex; this var has no effect until then
   SCION_CODEX_NOTIFY_AUTO_COMPLETE: "true"

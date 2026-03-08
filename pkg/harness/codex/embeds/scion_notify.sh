@@ -17,6 +17,7 @@ if [ -z "$event" ]; then
 fi
 
 if [ "$event" = "agent-turn-complete" ]; then
+  # TODO: notify hook is disabled pending full hook support in Codex; this script is currently unused
   autoc="${SCION_CODEX_NOTIFY_AUTO_COMPLETE-true}"
   if [ "$autoc" = "false" ] || [ "$autoc" = "0" ] || [ "$autoc" = "no" ]; then
     exit 0
