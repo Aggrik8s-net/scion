@@ -756,3 +756,55 @@ services:
 		}
 	})
 }
+
+func TestAppendExtraInstructions(t *testing.T) {
+	base := []byte("base instructions")
+
+	t.Run("no git no hub returns unchanged", func(t *testing.T) {
+		result := appendExtraInstructions(base, false, nil)
+		if string(result) != string(base) {
+			t.Errorf("expected unchanged content, got %q", string(result))
+		}
+	})
+
+	t.Run("nil settings returns unchanged for non-git", func(t *testing.T) {
+		result := appendExtraInstructions(base, false, nil)
+		if string(result) != string(base) {
+			t.Errorf("expected unchanged content, got %q", string(result))
+		}
+	})
+
+	t.Run("git true with empty embed file returns unchanged", func(t *testing.T) {
+		// The embedded agents-git.md is currently empty, so no content should be appended
+		result := appendExtraInstructions(base, true, nil)
+		if string(result) != string(base) {
+			t.Errorf("expected unchanged content when embed is empty, got %q", string(result))
+		}
+	})
+
+	t.Run("hub enabled with empty embed file returns unchanged", func(t *testing.T) {
+		enabled := true
+		settings := &config.VersionedSettings{
+			Hub: &config.V1HubClientConfig{
+				Enabled: &enabled,
+			},
+		}
+		result := appendExtraInstructions(base, false, settings)
+		if string(result) != string(base) {
+			t.Errorf("expected unchanged content when embed is empty, got %q", string(result))
+		}
+	})
+
+	t.Run("hub disabled does not append", func(t *testing.T) {
+		disabled := false
+		settings := &config.VersionedSettings{
+			Hub: &config.V1HubClientConfig{
+				Enabled: &disabled,
+			},
+		}
+		result := appendExtraInstructions(base, false, settings)
+		if string(result) != string(base) {
+			t.Errorf("expected unchanged content, got %q", string(result))
+		}
+	})
+}

@@ -479,6 +479,9 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 				}
 			}
 			if content != nil {
+				// Conditionally append extra instruction fragments before injection
+				content = appendExtraInstructions(content, isGit, settings)
+
 				util.Debugf("ProvisionAgent: injecting agent instructions (%d bytes) into %s", len(content), agentHome)
 				if err := h.InjectAgentInstructions(agentHome, content); err != nil {
 					return "", "", nil, fmt.Errorf("failed to inject agent instructions: %w", err)
@@ -525,6 +528,7 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 		// No template chain, but inline config may have content fields
 		if finalScionCfg.AgentInstructions != "" {
 			content := []byte(finalScionCfg.AgentInstructions)
+			content = appendExtraInstructions(content, isGit, settings)
 			util.Debugf("ProvisionAgent: injecting inline agent_instructions (%d bytes, no template)", len(content))
 			if err := h.InjectAgentInstructions(agentHome, content); err != nil {
 				return "", "", nil, fmt.Errorf("failed to inject agent instructions: %w", err)
@@ -674,6 +678,27 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 	}
 
 	return agentHome, agentWorkspace, finalScionCfg, nil
+}
+
+// appendExtraInstructions conditionally appends agents-git.md and/or
+// agents-hub.md content from the embedded default template to the base
+// agent instructions. This runs before harness-specific injection.
+func appendExtraInstructions(content []byte, isGit bool, settings *config.VersionedSettings) []byte {
+	if isGit {
+		if extra, err := config.EmbedsFS.ReadFile("embeds/templates/default/agents-git.md"); err == nil && len(extra) > 0 {
+			util.Debugf("ProvisionAgent: appending agents-git.md (%d bytes)", len(extra))
+			content = append(content, '\n')
+			content = append(content, extra...)
+		}
+	}
+	if settings != nil && settings.IsHubEnabled() {
+		if extra, err := config.EmbedsFS.ReadFile("embeds/templates/default/agents-hub.md"); err == nil && len(extra) > 0 {
+			util.Debugf("ProvisionAgent: appending agents-hub.md (%d bytes)", len(extra))
+			content = append(content, '\n')
+			content = append(content, extra...)
+		}
+	}
+	return content
 }
 
 func GetSavedProfile(agentName string, grovePath string) string {
