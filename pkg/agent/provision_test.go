@@ -172,13 +172,13 @@ func TestProvisionGeminiAgentSettings(t *testing.T) {
 
 	// Provision a gemini agent using the "default" agnostic template
 	agentName := "gemini-agent"
-	_, _, _, err := ProvisionAgent(context.Background(), agentName, "default", "", "gemini", projectScionDir, "", "", "", "")
+	agentHome, _, _, err := ProvisionAgent(context.Background(), agentName, "default", "", "gemini", projectScionDir, "", "", "", "")
 	if err != nil {
 		t.Fatalf("ProvisionAgent failed: %v", err)
 	}
 
 	// Verify agent's settings.json (copied from gemini harness-config's home)
-	agentSettingsPath := filepath.Join(projectScionDir, "agents", agentName, "home", ".gemini", "settings.json")
+	agentSettingsPath := filepath.Join(agentHome, ".gemini", "settings.json")
 	data, err := os.ReadFile(agentSettingsPath)
 	if err != nil {
 		t.Fatalf("failed to read agent settings.json: %v", err)
@@ -232,6 +232,9 @@ func TestProvisionWritesTaskToPromptMd(t *testing.T) {
 	rt := &runtime.MockRuntime{}
 	mgr := NewManager(rt)
 
+	// Resolve the actual grove directory (may be external for non-git groves)
+	resolvedGroveDir, _ := config.GetResolvedProjectDir(projectScionDir)
+
 	t.Run("with task", func(t *testing.T) {
 		opts := api.StartOptions{
 			Name:      "agent-with-task",
@@ -245,7 +248,7 @@ func TestProvisionWritesTaskToPromptMd(t *testing.T) {
 			t.Fatalf("Provision failed: %v", err)
 		}
 
-		promptFile := filepath.Join(projectScionDir, "agents", "agent-with-task", "prompt.md")
+		promptFile := filepath.Join(resolvedGroveDir, "agents", "agent-with-task", "prompt.md")
 		content, err := os.ReadFile(promptFile)
 		if err != nil {
 			t.Fatalf("failed to read prompt.md: %v", err)
@@ -267,7 +270,7 @@ func TestProvisionWritesTaskToPromptMd(t *testing.T) {
 			t.Fatalf("Provision failed: %v", err)
 		}
 
-		promptFile := filepath.Join(projectScionDir, "agents", "agent-no-task", "prompt.md")
+		promptFile := filepath.Join(resolvedGroveDir, "agents", "agent-no-task", "prompt.md")
 		content, err := os.ReadFile(promptFile)
 		if err != nil {
 			t.Fatalf("failed to read prompt.md: %v", err)

@@ -28,7 +28,8 @@ const (
 	GlobalDir = ".scion"
 )
 
-// FindProjectRoot walks up the directory tree to find the .scion directory.
+// FindProjectRoot walks up the directory tree to find the .scion directory or marker file.
+// When .scion is a file (grove marker), it resolves to the external grove-config path.
 func FindProjectRoot() (string, bool) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -38,11 +39,18 @@ func FindProjectRoot() (string, bool) {
 	dir := wd
 	for {
 		p := filepath.Join(dir, DotScion)
-		if info, err := os.Stat(p); err == nil && info.IsDir() {
-			if abs, err := filepath.EvalSymlinks(p); err == nil {
-				return abs, true
+		info, err := os.Stat(p)
+		if err == nil {
+			if info.IsDir() {
+				if abs, err := filepath.EvalSymlinks(p); err == nil {
+					return abs, true
+				}
+				return p, true
 			}
-			return p, true
+			// .scion is a file (grove marker) — resolve to external path
+			if resolved, err := ResolveGroveMarker(p); err == nil {
+				return resolved, true
+			}
 		}
 
 		parent := filepath.Dir(dir)
@@ -88,7 +96,13 @@ func GetGroveName(projectDir string) string {
 		return "global"
 	}
 
-	return api.Slugify(filepath.Base(parent))
+	baseName := filepath.Base(parent)
+	// Check for external grove-config directory pattern (slug__shortuuid)
+	if slug := ExtractSlugFromExternalDir(baseName); slug != "" {
+		return slug
+	}
+
+	return api.Slugify(baseName)
 }
 
 // GetTargetProjectDir returns the directory where a grove should be initialized.
@@ -190,16 +204,34 @@ func ResolveGrovePath(path string) (string, bool, error) {
 		return "", false, err
 	}
 
-	// If the path doesn't end with .scion, check if it contains a .scion subdirectory.
+	// If the path doesn't end with .scion, check if it contains a .scion entry.
 	// This allows users to pass a project root (e.g. /path/to/project) and have it
 	// resolve to /path/to/project/.scion, matching how FindProjectRoot discovers groves.
 	if filepath.Base(abs) != DotScion {
 		candidate := filepath.Join(abs, DotScion)
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			if evaluated, err := filepath.EvalSymlinks(candidate); err == nil {
-				abs = evaluated
+		if info, err := os.Stat(candidate); err == nil {
+			if info.IsDir() {
+				if evaluated, err := filepath.EvalSymlinks(candidate); err == nil {
+					abs = evaluated
+				} else {
+					abs = candidate
+				}
 			} else {
-				abs = candidate
+				// .scion is a marker file — resolve to external path
+				if resolved, err := ResolveGroveMarker(candidate); err == nil {
+					abs = resolved
+				}
+			}
+		}
+	} else {
+		// Path ends in .scion — check if it's a marker file (not a directory)
+		if info, err := os.Stat(abs); err == nil && !info.IsDir() {
+			if resolved, err := ResolveGroveMarker(abs); err == nil {
+				abs = resolved
+			}
+		} else if err == nil && info.IsDir() {
+			if evaluated, err := filepath.EvalSymlinks(abs); err == nil {
+				abs = evaluated
 			}
 		}
 	}
@@ -227,14 +259,32 @@ func RequireGrovePath(path string) (string, bool, error) {
 		if err != nil {
 			return "", false, err
 		}
-		// If the path doesn't end with .scion, check if it contains a .scion subdirectory.
+		// If the path doesn't end with .scion, check if it contains a .scion entry.
 		if filepath.Base(abs) != DotScion {
 			candidate := filepath.Join(abs, DotScion)
-			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-				if evaluated, err := filepath.EvalSymlinks(candidate); err == nil {
-					abs = evaluated
+			if info, err := os.Stat(candidate); err == nil {
+				if info.IsDir() {
+					if evaluated, err := filepath.EvalSymlinks(candidate); err == nil {
+						abs = evaluated
+					} else {
+						abs = candidate
+					}
 				} else {
-					abs = candidate
+					// .scion is a marker file — resolve to external path
+					if resolved, err := ResolveGroveMarker(candidate); err == nil {
+						abs = resolved
+					}
+				}
+			}
+		} else {
+			// Path ends in .scion — check if it's a marker file
+			if info, err := os.Stat(abs); err == nil && !info.IsDir() {
+				if resolved, err := ResolveGroveMarker(abs); err == nil {
+					abs = resolved
+				}
+			} else if err == nil && info.IsDir() {
+				if evaluated, err := filepath.EvalSymlinks(abs); err == nil {
+					abs = evaluated
 				}
 			}
 		}

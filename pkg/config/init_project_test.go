@@ -95,6 +95,130 @@ func TestEnsureScionGitignore_RecognizesVariants(t *testing.T) {
 	}
 }
 
+func TestInitProject_NonGitCreatesMarkerAndExternalDir(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	mockRuntimeDetection(t, "docker")
+
+	// Create a non-git project directory
+	projectDir := t.TempDir()
+	scionDir := filepath.Join(projectDir, ".scion")
+
+	// Change to the project directory (non-git)
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+	os.Chdir(projectDir)
+
+	// InitProject with the .scion path as target
+	if err := InitProject(scionDir, GetMockHarnesses()); err != nil {
+		t.Fatalf("InitProject failed: %v", err)
+	}
+
+	// Verify .scion is a marker file (not a directory)
+	markerPath := filepath.Join(projectDir, ".scion")
+	info, err := os.Stat(markerPath)
+	if err != nil {
+		t.Fatalf("marker file does not exist: %v", err)
+	}
+	if info.IsDir() {
+		t.Fatal("expected .scion to be a file (marker), but it's a directory")
+	}
+
+	// Read the marker and verify content
+	marker, err := ReadGroveMarker(markerPath)
+	if err != nil {
+		t.Fatalf("ReadGroveMarker failed: %v", err)
+	}
+	if marker.GroveSlug == "" {
+		t.Error("marker should have a grove-slug")
+	}
+	if marker.GroveID == "" {
+		t.Error("marker should have a grove-id")
+	}
+
+	// Verify external grove directory was created
+	externalPath, err := marker.ExternalGrovePath()
+	if err != nil {
+		t.Fatalf("ExternalGrovePath failed: %v", err)
+	}
+
+	// Check standard dirs
+	for _, sub := range []string{"templates", "agents"} {
+		p := filepath.Join(externalPath, sub)
+		if _, err := os.Stat(p); os.IsNotExist(err) {
+			t.Errorf("expected %s/ to exist in external grove", sub)
+		}
+	}
+
+	// Check settings.yaml with workspace_path
+	settingsPath := filepath.Join(externalPath, "settings.yaml")
+	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
+		t.Fatal("expected settings.yaml in external grove")
+	}
+	data, _ := os.ReadFile(settingsPath)
+	if !containsSubstring(string(data), "workspace_path") {
+		t.Error("settings.yaml should contain workspace_path")
+	}
+}
+
+func TestInitProject_NonGitRejectsOldStyleDir(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	mockRuntimeDetection(t, "docker")
+
+	// Create a non-git project with old-style .scion directory
+	projectDir := t.TempDir()
+	scionDir := filepath.Join(projectDir, ".scion")
+	os.MkdirAll(scionDir, 0755)
+
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+	os.Chdir(projectDir)
+
+	err := InitProject(scionDir, GetMockHarnesses())
+	if err == nil {
+		t.Fatal("expected error for old-style non-git grove, got nil")
+	}
+	if !containsSubstring(err.Error(), "outdated") {
+		t.Errorf("expected error about outdated format, got: %v", err)
+	}
+}
+
+func TestInitProject_NonGitIdempotent(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	mockRuntimeDetection(t, "docker")
+
+	projectDir := t.TempDir()
+	scionDir := filepath.Join(projectDir, ".scion")
+
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+	os.Chdir(projectDir)
+
+	// First init
+	if err := InitProject(scionDir, GetMockHarnesses()); err != nil {
+		t.Fatalf("first InitProject failed: %v", err)
+	}
+
+	// Read marker from first init
+	marker1, _ := ReadGroveMarker(filepath.Join(projectDir, ".scion"))
+
+	// Second init should succeed and use existing marker
+	if err := InitProject(scionDir, GetMockHarnesses()); err != nil {
+		t.Fatalf("second InitProject failed: %v", err)
+	}
+
+	// Read marker after second init — should be unchanged
+	marker2, _ := ReadGroveMarker(filepath.Join(projectDir, ".scion"))
+	if marker1.GroveID != marker2.GroveID {
+		t.Errorf("grove-id changed between inits: %q → %q", marker1.GroveID, marker2.GroveID)
+	}
+}
+
 func TestInitProject_CreatesEmptyTemplatesDir(t *testing.T) {
 	// Create a temporary directory for the project
 	tempDir, err := os.MkdirTemp("", "scion-init-test")

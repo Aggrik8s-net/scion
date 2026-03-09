@@ -227,6 +227,7 @@ type VersionedSettings struct {
 	Telemetry       *V1TelemetryConfig              `json:"telemetry,omitempty" yaml:"telemetry,omitempty" koanf:"telemetry"`
 	Runtimes        map[string]V1RuntimeConfig      `json:"runtimes,omitempty" yaml:"runtimes,omitempty" koanf:"runtimes"`
 	ImageRegistry   string                          `json:"image_registry,omitempty" yaml:"image_registry,omitempty" koanf:"image_registry"`
+	WorkspacePath   string                          `json:"workspace_path,omitempty" yaml:"workspace_path,omitempty" koanf:"workspace_path"`
 	HarnessConfigs  map[string]HarnessConfigEntry   `json:"harness_configs,omitempty" yaml:"harness_configs,omitempty" koanf:"harness_configs"`
 	Profiles        map[string]V1ProfileConfig      `json:"profiles,omitempty" yaml:"profiles,omitempty" koanf:"profiles"`
 }
@@ -1239,6 +1240,7 @@ func convertVersionedToLegacy(vs *VersionedSettings) *Settings {
 	s := &Settings{
 		ActiveProfile:   vs.ActiveProfile,
 		DefaultTemplate: vs.DefaultTemplate,
+		WorkspacePath:   vs.WorkspacePath,
 	}
 
 	// Convert Hub

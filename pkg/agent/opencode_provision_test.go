@@ -66,13 +66,13 @@ func TestProvisionOpencodeAgent(t *testing.T) {
 
 	// Provision an opencode agent using the "default" agnostic template with --harness-config=opencode
 	agentName := "opencode-agent"
-	_, _, _, err := ProvisionAgent(context.Background(), agentName, "default", "", "opencode", projectScionDir, "", "", "", "")
+	agentHome, _, _, err := ProvisionAgent(context.Background(), agentName, "default", "", "opencode", projectScionDir, "", "", "", "")
 	if err != nil {
 		t.Fatalf("ProvisionAgent failed: %v", err)
 	}
 
 	// Verify agent's opencode.json (from harness-config home)
-	agentOpencodeJSONPath := filepath.Join(projectScionDir, "agents", agentName, "home", ".config", "opencode", "opencode.json")
+	agentOpencodeJSONPath := filepath.Join(agentHome, ".config", "opencode", "opencode.json")
 	if _, err := os.Stat(agentOpencodeJSONPath); os.IsNotExist(err) {
 		t.Fatalf("expected opencode.json to exist at %s", agentOpencodeJSONPath)
 	}

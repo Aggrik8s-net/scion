@@ -267,6 +267,9 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 		// Case 3: Non-Git Repository (and no explicit workspace)
 		if groveName == "global" {
 			workspaceSource, _ = os.Getwd()
+		} else if settings != nil && settings.WorkspacePath != "" {
+			// Externalized grove: use workspace-path from settings
+			workspaceSource = settings.WorkspacePath
 		} else {
 			workspaceSource = filepath.Dir(projectDir)
 		}

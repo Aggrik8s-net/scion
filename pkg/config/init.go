@@ -259,11 +259,18 @@ func GetEnclosingGrovePath() (grovePath string, rootDir string, found bool) {
 	dir := wd
 	for {
 		p := filepath.Join(dir, DotScion)
-		if info, err := os.Stat(p); err == nil && info.IsDir() {
-			if abs, err := filepath.EvalSymlinks(p); err == nil {
-				return abs, dir, true
+		info, err := os.Stat(p)
+		if err == nil {
+			if info.IsDir() {
+				if abs, err := filepath.EvalSymlinks(p); err == nil {
+					return abs, dir, true
+				}
+				return p, dir, true
 			}
-			return p, dir, true
+			// .scion is a marker file — resolve to external path
+			if resolved, err := ResolveGroveMarker(p); err == nil {
+				return resolved, dir, true
+			}
 		}
 
 		parent := filepath.Dir(dir)
@@ -349,6 +356,8 @@ func InitProject(targetDir string, harnesses []api.Harness, opts ...InitProjectO
 		opt = opts[0]
 	}
 
+	isGit := util.IsGitRepo()
+
 	var projectDir string
 	var err error
 
@@ -362,28 +371,123 @@ func InitProject(targetDir string, harnesses []api.Harness, opts ...InitProjectO
 	}
 
 	// Enforce .scion in .gitignore for git repos
-	if util.IsGitRepo() {
+	if isGit {
 		root, err := util.RepoRoot()
 		if err == nil {
 			_ = EnsureScionGitignore(root)
 		}
 	}
 
-	// Create grove-level settings file if it doesn't exist
+	// For non-git groves, externalize the grove data.
+	// The .scion entry in the project directory becomes a marker file pointing
+	// to ~/.scion/grove-configs/<slug>__<short-uuid>/.scion/
+	if !isGit {
+		return initExternalGrove(projectDir, opt)
+	}
+
+	// Git grove: create .scion as a directory (in-repo)
+	return initInRepoGrove(projectDir, opt)
+}
+
+// initExternalGrove creates a non-git grove with externalized data.
+// The project directory gets a .scion marker file, and the actual grove
+// data lives under ~/.scion/grove-configs/.
+func initExternalGrove(projectDir string, opt InitProjectOpts) error {
+	// projectDir is the intended <project>/.scion path.
+	projectRoot := filepath.Dir(projectDir)
+	markerPath := filepath.Join(projectRoot, DotScion)
+
+	// TODO(grove-migration): Remove this check after a few releases.
+	// Detect old-style non-git grove (directory instead of marker file).
+	if info, err := os.Stat(markerPath); err == nil && info.IsDir() {
+		return fmt.Errorf("this grove at %s uses an outdated directory format.\n"+
+			"Non-git groves now use externalized storage. Please:\n"+
+			"  1. Back up any custom templates from %s/templates/\n"+
+			"  2. Remove the .scion directory: rm -rf %s\n"+
+			"  3. Re-initialize: scion init",
+			projectRoot, markerPath, markerPath)
+	}
+
+	// If a marker file already exists, read it and use the existing external path
+	if IsGroveMarkerFile(markerPath) {
+		resolved, err := ResolveGroveMarker(markerPath)
+		if err != nil {
+			return fmt.Errorf("existing grove marker is invalid: %w", err)
+		}
+		// External grove already set up — just ensure directories exist
+		return ensureGroveDirs(resolved, opt)
+	}
+
+	// Generate new grove identity
+	groveID := GenerateGroveID()
+	groveName := filepath.Base(projectRoot)
+	groveSlug := api.Slugify(groveName)
+
+	marker := &GroveMarker{
+		GroveID:   groveID,
+		GroveName: groveName,
+		GroveSlug: groveSlug,
+	}
+
+	// Create external grove directory
+	externalPath, err := marker.ExternalGrovePath()
+	if err != nil {
+		return fmt.Errorf("failed to compute external grove path: %w", err)
+	}
+
+	// Write settings with workspace-path before ensureGroveDirs (which would
+	// create a settings.yaml without workspace_path if one doesn't exist yet).
+	absProjectRoot, _ := filepath.Abs(projectRoot)
+	if err := os.MkdirAll(externalPath, 0755); err != nil {
+		return fmt.Errorf("failed to create external grove directory: %w", err)
+	}
+	if GetSettingsPath(externalPath) == "" {
+		if err := writeGroveSettings(externalPath, absProjectRoot, opt); err != nil {
+			return err
+		}
+	}
+
+	if err := ensureGroveDirs(externalPath, opt); err != nil {
+		return err
+	}
+
+	// Ensure the project root directory exists before writing the marker
+	if err := os.MkdirAll(projectRoot, 0755); err != nil {
+		return fmt.Errorf("failed to create project directory: %w", err)
+	}
+
+	// Write the marker file
+	if err := WriteGroveMarker(markerPath, marker); err != nil {
+		return fmt.Errorf("failed to write grove marker: %w", err)
+	}
+
+	return nil
+}
+
+// initInRepoGrove creates a git grove with .scion as a directory in the repo.
+func initInRepoGrove(projectDir string, opt InitProjectOpts) error {
 	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		return fmt.Errorf("failed to create settings directory: %w", err)
 	}
+
+	return ensureGroveDirs(projectDir, opt)
+}
+
+// ensureGroveDirs creates the standard grove subdirectories and seeds settings.
+func ensureGroveDirs(projectDir string, opt InitProjectOpts) error {
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		return fmt.Errorf("failed to create grove directory: %w", err)
+	}
+
 	// Check if any settings file exists (YAML or JSON)
 	settingsPath := GetSettingsPath(projectDir)
 	if settingsPath == "" {
 		if !opt.SkipRuntimeCheck {
-			// Validate that a functioning container runtime is available
 			if _, err := DetectLocalRuntime(); err != nil {
 				return err
 			}
 		}
 
-		// Seed grove-specific settings (no profiles/runtimes; those live in global settings)
 		defaultSettings, err := GetGroveDefaultSettingsYAML()
 		if err != nil {
 			return fmt.Errorf("failed to read default grove settings: %w", err)
@@ -403,6 +507,40 @@ func InitProject(targetDir string, harnesses []api.Harness, opts ...InitProjectO
 
 	if err := os.MkdirAll(agentsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create agents directory: %w", err)
+	}
+
+	return nil
+}
+
+// writeGroveSettings writes the initial settings.yaml for an external grove,
+// including the workspace-path field.
+func writeGroveSettings(externalPath, workspacePath string, opt InitProjectOpts) error {
+	if !opt.SkipRuntimeCheck {
+		if _, err := DetectLocalRuntime(); err != nil {
+			return err
+		}
+	}
+
+	defaultSettings, err := GetGroveDefaultSettingsYAML()
+	if err != nil {
+		return fmt.Errorf("failed to read default grove settings: %w", err)
+	}
+
+	// Parse default settings, add workspace-path, and re-marshal
+	var settingsMap map[string]interface{}
+	if err := yaml.Unmarshal(defaultSettings, &settingsMap); err != nil {
+		return fmt.Errorf("failed to parse default grove settings: %w", err)
+	}
+	settingsMap["workspace_path"] = workspacePath
+
+	data, err := yaml.Marshal(settingsMap)
+	if err != nil {
+		return fmt.Errorf("failed to marshal grove settings: %w", err)
+	}
+
+	settingsFile := filepath.Join(externalPath, "settings.yaml")
+	if err := os.WriteFile(settingsFile, data, 0644); err != nil {
+		return fmt.Errorf("failed to write grove settings.yaml: %w", err)
 	}
 
 	return nil
