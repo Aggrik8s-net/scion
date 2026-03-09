@@ -398,6 +398,8 @@ func runInit(args []string) int {
 						RefreshAt: refreshAt,
 						OnRefreshed: func(newExpiry time.Time) {
 							log.Info("Token refreshed successfully, new expiry: %s", newExpiry.Format(time.RFC3339))
+							// Update env var for any in-process NewClient() calls (e.g. shutdown)
+							os.Setenv(hub.EnvHubToken, hubClient.GetToken())
 						},
 						OnError: func(err error) {
 							log.Error("Token refresh failed: %v", err)

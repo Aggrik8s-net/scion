@@ -555,6 +555,12 @@ func TestParseTokenExpiry(t *testing.T) {
 
 func TestClient_RefreshToken(t *testing.T) {
 	t.Run("successful refresh", func(t *testing.T) {
+		// Use temp HOME to isolate token file writes
+		tmpHome := t.TempDir()
+		origHome := os.Getenv("HOME")
+		os.Setenv("HOME", tmpHome)
+		defer os.Setenv("HOME", origHome)
+
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, http.MethodPost, r.Method)
 			assert.Equal(t, "/api/v1/agents/agent-123/token/refresh", r.URL.Path)
@@ -575,6 +581,10 @@ func TestClient_RefreshToken(t *testing.T) {
 
 		// Client token should be updated
 		assert.Equal(t, "new-token", client.GetToken())
+
+		// Token file should be written for child processes
+		fileToken := ReadTokenFile()
+		assert.Equal(t, "new-token", fileToken, "refreshed token should be persisted to file")
 	})
 
 	t.Run("server rejects refresh", func(t *testing.T) {
@@ -779,6 +789,111 @@ func TestOperatingMode_Defaults(t *testing.T) {
 	mode := OperatingMode()
 	assert.Equal(t, ModeLocal, mode, "should default to ModeLocal when no env vars are set")
 	assert.Equal(t, "local", mode.String())
+}
+
+func TestTokenFile_WriteAndRead(t *testing.T) {
+	tmpHome := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpHome)
+	defer os.Setenv("HOME", origHome)
+
+	t.Run("read returns empty when no file", func(t *testing.T) {
+		token := ReadTokenFile()
+		assert.Equal(t, "", token)
+	})
+
+	t.Run("write and read round-trip", func(t *testing.T) {
+		err := WriteTokenFile("my-refreshed-token")
+		require.NoError(t, err)
+
+		token := ReadTokenFile()
+		assert.Equal(t, "my-refreshed-token", token)
+	})
+
+	t.Run("overwrite with newer token", func(t *testing.T) {
+		err := WriteTokenFile("even-newer-token")
+		require.NoError(t, err)
+
+		token := ReadTokenFile()
+		assert.Equal(t, "even-newer-token", token)
+	})
+}
+
+func TestNewClient_UsesRefreshedTokenFile(t *testing.T) {
+	tmpHome := t.TempDir()
+	origHome := os.Getenv("HOME")
+	origEndpoint := os.Getenv(EnvHubEndpoint)
+	origToken := os.Getenv(EnvHubToken)
+	origAgentID := os.Getenv(EnvAgentID)
+	defer func() {
+		os.Setenv("HOME", origHome)
+		os.Setenv(EnvHubEndpoint, origEndpoint)
+		os.Setenv(EnvHubToken, origToken)
+		os.Setenv(EnvAgentID, origAgentID)
+	}()
+
+	os.Setenv("HOME", tmpHome)
+	os.Setenv(EnvHubEndpoint, "http://hub.example.com")
+	os.Setenv(EnvHubToken, "original-env-token")
+	os.Setenv(EnvAgentID, "agent-123")
+
+	t.Run("uses env token when no file exists", func(t *testing.T) {
+		client := NewClient()
+		require.NotNil(t, client)
+		assert.Equal(t, "original-env-token", client.GetToken())
+	})
+
+	t.Run("prefers file token over env token", func(t *testing.T) {
+		err := WriteTokenFile("refreshed-file-token")
+		require.NoError(t, err)
+
+		client := NewClient()
+		require.NotNil(t, client)
+		assert.Equal(t, "refreshed-file-token", client.GetToken(),
+			"NewClient should use the refreshed token from file over the env var")
+	})
+}
+
+func TestClient_RefreshToken_ConcurrentAccess(t *testing.T) {
+	tmpHome := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpHome)
+	defer os.Setenv("HOME", origHome)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/agents/agent-123/token/refresh" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"token":"concurrent-new-token","expires_at":"2030-01-01T00:00:00Z"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewClientWithConfig(server.URL, "initial-token", "agent-123")
+
+	// Run concurrent refresh and heartbeat to detect data races.
+	// Use -race flag to validate: go test -race ./pkg/sciontool/hub/
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for ctx.Err() == nil {
+			client.RefreshToken(context.Background())
+		}
+	}()
+
+	// Concurrent heartbeats
+	for ctx.Err() == nil {
+		client.Heartbeat(context.Background())
+	}
+
+	<-done
+	// If we get here without a race detector failure, the mutex is working
+	assert.NotEmpty(t, client.GetToken())
 }
 
 func TestClient_StartHeartbeat_DefaultConfig(t *testing.T) {

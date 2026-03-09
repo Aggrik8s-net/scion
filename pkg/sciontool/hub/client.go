@@ -25,10 +25,19 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	state "github.com/ptone/scion-agent/pkg/agent/state"
+)
+
+const (
+	// RefreshedTokenFile is the filename where the refreshed token is persisted.
+	// This allows child processes (hooks, status commands) to read the latest token
+	// instead of relying on the original SCION_AUTH_TOKEN environment variable.
+	RefreshedTokenFile = "scion-refreshed-token"
 )
 
 const (
@@ -130,6 +139,7 @@ type StatusUpdate struct {
 type Client struct {
 	hubURL         string
 	token          string
+	tokenMu        sync.RWMutex
 	agentID        string
 	client         *http.Client
 	maxRetries     int
@@ -139,6 +149,8 @@ type Client struct {
 
 // NewClient creates a new Hub client from environment variables.
 // Reads SCION_HUB_ENDPOINT first, falling back to SCION_HUB_URL for legacy compat.
+// If a refreshed token file exists (written by the init process after token refresh),
+// it takes precedence over the SCION_AUTH_TOKEN environment variable.
 // Returns nil if the required environment variables are not set.
 func NewClient() *Client {
 	hubURL := os.Getenv(EnvHubEndpoint)
@@ -150,6 +162,14 @@ func NewClient() *Client {
 
 	if hubURL == "" || token == "" || agentID == "" {
 		return nil
+	}
+
+	// Check for a refreshed token file written by the init process.
+	// This is necessary because child processes (hooks, status commands)
+	// inherit the original SCION_AUTH_TOKEN env var at fork time and never
+	// see in-memory token updates from the init process's refresh loop.
+	if refreshed := ReadTokenFile(); refreshed != "" {
+		token = refreshed
 	}
 
 	return &Client{
@@ -183,7 +203,13 @@ func NewClientWithConfig(hubURL, token, agentID string) *Client {
 // IsConfigured returns true if the client is properly configured.
 // Requires hubURL, token, and agentID to all be set.
 func (c *Client) IsConfigured() bool {
-	return c != nil && c.hubURL != "" && c.token != "" && c.agentID != ""
+	if c == nil {
+		return false
+	}
+	c.tokenMu.RLock()
+	token := c.token
+	c.tokenMu.RUnlock()
+	return c.hubURL != "" && token != "" && c.agentID != ""
 }
 
 // IsHostedMode returns true if the agent is running in hosted mode.
@@ -209,6 +235,11 @@ func (c *Client) UpdateStatus(ctx context.Context, status StatusUpdate) error {
 		return fmt.Errorf("failed to marshal status: %w", err)
 	}
 
+	// Read token under lock to avoid data race with concurrent RefreshToken calls.
+	c.tokenMu.RLock()
+	currentToken := c.token
+	c.tokenMu.RUnlock()
+
 	var lastErr error
 	attempts := c.maxRetries + 1
 	for attempt := 0; attempt < attempts; attempt++ {
@@ -230,7 +261,7 @@ func (c *Client) UpdateStatus(ctx context.Context, status StatusUpdate) error {
 		}
 
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Scion-Agent-Token", c.token)
+		req.Header.Set("X-Scion-Agent-Token", currentToken)
 
 		resp, err := c.client.Do(req)
 		if err != nil {
@@ -306,7 +337,9 @@ type RefreshTokenResponse struct {
 }
 
 // RefreshToken calls the Hub to refresh the agent's authentication token.
-// On success, the client's token is updated in-place.
+// On success, the client's token is updated in-place and persisted to the
+// refreshed token file so that child processes (hooks, status commands) can
+// pick up the new token.
 func (c *Client) RefreshToken(ctx context.Context) (string, time.Time, error) {
 	if !c.IsConfigured() {
 		return "", time.Time{}, fmt.Errorf("hub client not configured")
@@ -315,12 +348,17 @@ func (c *Client) RefreshToken(ctx context.Context) (string, time.Time, error) {
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/token/refresh",
 		strings.TrimSuffix(c.hubURL, "/"), c.agentID)
 
+	// Read current token under lock
+	c.tokenMu.RLock()
+	currentToken := c.token
+	c.tokenMu.RUnlock()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("X-Scion-Agent-Token", c.token)
+	req.Header.Set("X-Scion-Agent-Token", currentToken)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -345,8 +383,17 @@ func (c *Client) RefreshToken(ctx context.Context) (string, time.Time, error) {
 		return "", time.Time{}, fmt.Errorf("failed to parse expiry time: %w", err)
 	}
 
-	// Update the client's token in-place
+	// Update the client's token under write lock
+	c.tokenMu.Lock()
 	c.token = result.Token
+	c.tokenMu.Unlock()
+
+	// Persist the new token to a file so child processes can read it.
+	// Errors are non-fatal — the in-memory token is already updated.
+	if err := WriteTokenFile(result.Token); err != nil {
+		// Log will be handled by caller; we don't import log here
+		_ = err
+	}
 
 	return result.Token, expiresAt, nil
 }
@@ -449,6 +496,8 @@ func (c *Client) GetToken() string {
 	if c == nil {
 		return ""
 	}
+	c.tokenMu.RLock()
+	defer c.tokenMu.RUnlock()
 	return c.token
 }
 
@@ -498,6 +547,53 @@ const DefaultHeartbeatInterval = 30 * time.Second
 
 // DefaultHeartbeatTimeout is the default timeout for heartbeat requests.
 const DefaultHeartbeatTimeout = 10 * time.Second
+
+// tokenFilePath returns the path to the refreshed token file.
+// It uses $HOME/.scion/<RefreshedTokenFile>.
+func tokenFilePath() string {
+	home := os.Getenv("HOME")
+	if home == "" {
+		home = "/home/scion"
+	}
+	return filepath.Join(home, ".scion", RefreshedTokenFile)
+}
+
+// WriteTokenFile persists a refreshed token to disk so that child processes
+// (hooks, status commands) can read it. The file is written atomically via
+// a temp file + rename to avoid partial reads.
+func WriteTokenFile(token string) error {
+	path := tokenFilePath()
+	dir := filepath.Dir(path)
+
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("failed to create token file directory: %w", err)
+	}
+
+	// Write to temp file then rename for atomicity
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(token), 0600); err != nil {
+		return fmt.Errorf("failed to write token file: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("failed to rename token file: %w", err)
+	}
+	return nil
+}
+
+// ReadTokenFile reads a refreshed token from the token file.
+// Returns empty string if the file doesn't exist or can't be read.
+func ReadTokenFile() string {
+	data, err := os.ReadFile(tokenFilePath())
+	if err != nil {
+		return ""
+	}
+	token := strings.TrimSpace(string(data))
+	if token == "" {
+		return ""
+	}
+	return token
+}
 
 // StartHeartbeat starts a background goroutine that periodically sends heartbeats to the Hub.
 // The heartbeat loop runs until the context is cancelled.
