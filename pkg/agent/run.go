@@ -75,6 +75,9 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 		}
 	}
 
+	if opts.BrokerMode {
+		ctx = api.ContextWithBrokerMode(ctx)
+	}
 	if opts.GitClone != nil {
 		ctx = api.ContextWithGitClone(ctx, opts.GitClone)
 	}

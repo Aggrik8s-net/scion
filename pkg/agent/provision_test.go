@@ -759,23 +759,24 @@ services:
 
 func TestAppendExtraInstructions(t *testing.T) {
 	base := []byte("base instructions")
+	ctx := context.Background()
 
 	t.Run("no git no hub returns unchanged", func(t *testing.T) {
-		result := appendExtraInstructions(base, false, nil)
+		result := appendExtraInstructions(ctx, base, false, nil)
 		if string(result) != string(base) {
 			t.Errorf("expected unchanged content, got %q", string(result))
 		}
 	})
 
 	t.Run("nil settings returns unchanged for non-git", func(t *testing.T) {
-		result := appendExtraInstructions(base, false, nil)
+		result := appendExtraInstructions(ctx, base, false, nil)
 		if string(result) != string(base) {
 			t.Errorf("expected unchanged content, got %q", string(result))
 		}
 	})
 
 	t.Run("git true appends agents-git.md content", func(t *testing.T) {
-		result := appendExtraInstructions(base, true, nil)
+		result := appendExtraInstructions(ctx, base, true, nil)
 		if string(result) == string(base) {
 			t.Errorf("expected content to be appended for git=true")
 		}
@@ -794,7 +795,7 @@ func TestAppendExtraInstructions(t *testing.T) {
 				Enabled: &enabled,
 			},
 		}
-		result := appendExtraInstructions(base, false, settings)
+		result := appendExtraInstructions(ctx, base, false, settings)
 		if string(result) == string(base) {
 			t.Errorf("expected content to be appended for hub enabled")
 		}
@@ -813,9 +814,20 @@ func TestAppendExtraInstructions(t *testing.T) {
 				Enabled: &disabled,
 			},
 		}
-		result := appendExtraInstructions(base, false, settings)
+		result := appendExtraInstructions(ctx, base, false, settings)
 		if string(result) != string(base) {
 			t.Errorf("expected unchanged content, got %q", string(result))
+		}
+	})
+
+	t.Run("broker mode appends agents-hub.md even without hub settings", func(t *testing.T) {
+		brokerCtx := api.ContextWithBrokerMode(ctx)
+		result := appendExtraInstructions(brokerCtx, base, false, nil)
+		if string(result) == string(base) {
+			t.Errorf("expected content to be appended for broker mode")
+		}
+		if !strings.Contains(string(result), "Scion CLI Operating Instructions") {
+			t.Errorf("result should contain hub instructions from agents-hub.md in broker mode")
 		}
 	})
 }

@@ -466,6 +466,19 @@ func GitCloneFromContext(ctx context.Context) *GitCloneConfig {
 	return gc
 }
 
+type brokerModeContextKey struct{}
+
+// ContextWithBrokerMode returns a new context with broker mode flag attached.
+func ContextWithBrokerMode(ctx context.Context) context.Context {
+	return context.WithValue(ctx, brokerModeContextKey{}, true)
+}
+
+// IsBrokerModeFromContext returns true if the context indicates broker mode.
+func IsBrokerModeFromContext(ctx context.Context) bool {
+	v, _ := ctx.Value(brokerModeContextKey{}).(bool)
+	return v
+}
+
 type StartOptions struct {
 	Name            string
 	Task            string

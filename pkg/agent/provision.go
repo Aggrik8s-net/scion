@@ -169,6 +169,9 @@ func StopGroveContainers(ctx context.Context, mgr Manager, groveName string, age
 }
 
 func (m *AgentManager) Provision(ctx context.Context, opts api.StartOptions) (*api.ScionConfig, error) {
+	if opts.BrokerMode {
+		ctx = api.ContextWithBrokerMode(ctx)
+	}
 	if opts.GitClone != nil {
 		ctx = api.ContextWithGitClone(ctx, opts.GitClone)
 	}
@@ -533,7 +536,7 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 			}
 			if content != nil {
 				// Conditionally append extra instruction fragments before injection
-				content = appendExtraInstructions(content, isGit, settings)
+				content = appendExtraInstructions(ctx, content, isGit, settings)
 
 				util.Debugf("ProvisionAgent: injecting agent instructions (%d bytes) into %s", len(content), agentHome)
 				if err := h.InjectAgentInstructions(agentHome, content); err != nil {
@@ -581,7 +584,7 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 		// No template chain, but inline config may have content fields
 		if finalScionCfg.AgentInstructions != "" {
 			content := []byte(finalScionCfg.AgentInstructions)
-			content = appendExtraInstructions(content, isGit, settings)
+			content = appendExtraInstructions(ctx, content, isGit, settings)
 			util.Debugf("ProvisionAgent: injecting inline agent_instructions (%d bytes, no template)", len(content))
 			if err := h.InjectAgentInstructions(agentHome, content); err != nil {
 				return "", "", nil, fmt.Errorf("failed to inject agent instructions: %w", err)
@@ -736,7 +739,7 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 // appendExtraInstructions conditionally appends agents-git.md and/or
 // agents-hub.md content from the embedded default template to the base
 // agent instructions. This runs before harness-specific injection.
-func appendExtraInstructions(content []byte, isGit bool, settings *config.VersionedSettings) []byte {
+func appendExtraInstructions(ctx context.Context, content []byte, isGit bool, settings *config.VersionedSettings) []byte {
 	if isGit {
 		if extra, err := config.EmbedsFS.ReadFile("embeds/templates/default/agents-git.md"); err == nil && len(extra) > 0 {
 			util.Debugf("ProvisionAgent: appending agents-git.md (%d bytes)", len(extra))
@@ -744,7 +747,8 @@ func appendExtraInstructions(content []byte, isGit bool, settings *config.Versio
 			content = append(content, extra...)
 		}
 	}
-	if settings != nil && settings.IsHubEnabled() {
+	hubEnabled := (settings != nil && settings.IsHubEnabled()) || api.IsBrokerModeFromContext(ctx)
+	if hubEnabled {
 		if extra, err := config.EmbedsFS.ReadFile("embeds/templates/default/agents-hub.md"); err == nil && len(extra) > 0 {
 			util.Debugf("ProvisionAgent: appending agents-hub.md (%d bytes)", len(extra))
 			content = append(content, '\n')
