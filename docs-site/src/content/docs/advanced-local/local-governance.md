@@ -17,7 +17,7 @@ Scion looks for `settings.yaml` in two places:
 ## Core Concepts
 
 ### Profiles
-Profiles are the primary way to switch contexts. You might have a `local` profile for debugging and a `high-power` profile for heavy tasks.
+Profiles are the primary way to switch contexts. You might have a `local` profile for debugging and a `high-power` profile for heavy tasks. The defaults are `local` and `remote`.
 
 ```yaml
 active_profile: local
@@ -34,7 +34,7 @@ scion start my-agent --profile local
 ```
 
 ### Runtimes
-Runtimes define *where* the agent runs. For local development, this is usually **Docker** or **Apple Virtualization**.
+Runtimes define *where* the agent runs. For local development, this is usually **Docker**, **podman**, or **Apple Virtualization**.
 
 ```yaml
 runtimes:
@@ -52,7 +52,7 @@ runtimes:
 ```
 
 ### Harness Configs
-Harness Configs define *what* runs. They map a logical name (like `gemini`) to a specific container image and configuration.
+Harness Configs define *what* agent harness runs, with what configurations. They map a logical name (like `gemini`) to a specific container image and configuration for that harness.
 
 ```yaml
 harness_configs:
@@ -93,6 +93,16 @@ harness_configs:
       - source: "/Users/me/code/shared-lib"
         target: "/home/scion/shared-lib"
         read_only: true
+```
+
+This is also useful if you want to mount common build caches, such as:
+
+```
+    volumes:
+        - source: ${GOPATH}/pkg
+          target: /home/scion/go/pkg
+        - source: /Users/me/Library/Caches/go-build
+          target: /home/scion/.cache/go-build
 ```
 
 ## Troubleshooting
