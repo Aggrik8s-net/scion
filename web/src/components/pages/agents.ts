@@ -581,7 +581,7 @@ export class ScionPageAgents extends LitElement {
               <th>Name</th>
               <th>Grove</th>
               <th class="hide-mobile">Template</th>
-              <th>Status</th>
+              <th class="status-col">Status</th>
               <th class="hide-mobile">Task</th>
               <th>Actions</th>
             </tr>

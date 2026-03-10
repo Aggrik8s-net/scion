@@ -627,6 +627,10 @@ export const listPageStyles = css`
     text-decoration: underline;
   }
 
+  .resource-table-container .status-col {
+    min-width: 11rem;
+  }
+
   .resource-table-container .task-cell {
     max-width: 250px;
     overflow: hidden;

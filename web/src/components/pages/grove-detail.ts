@@ -1336,7 +1336,7 @@ export class ScionPageGroveDetail extends LitElement {
             <tr>
               <th>Name</th>
               <th class="hide-mobile">Template</th>
-              <th>Status</th>
+              <th class="status-col">Status</th>
               <th class="hide-mobile">Task</th>
               <th>Actions</th>
             </tr>
