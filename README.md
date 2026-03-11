@@ -4,9 +4,9 @@ _sci·on /ˈsīən/ noun 1. a young shoot or twig of a plant, especially one cut
 
 Scion is an experimental multi-agent orchestration testbed designed to manage concurrent LLM-based agents running in containers across your local machine and remote clusters. It enables developers to run groups of specialized agents with isolated identities, credentials, and workspaces, allowing for a dynamic and evolving graph of parallel execution of tasks such as research, coding, auditing, and testing.
 
-Scion takes a "less is more" approach to allowing modern powerful models to determine the execution of orchestration patterns by leveraging the progressive skill approach of dynamically loading the usage help text of the `scion` cli tool to manage other agents. This provides a system to rapidly experiment with different orchestration patterns and approaches through natural language prompting.
+Scion takes a "less is more" approach to allowing modern powerful models to determine the execution of orchestration patterns by leveraging the progressive skill approach of dynamically loading the usage help text of the `scion` cli tool to manage other agents. This provides a system to rapidly experiment with different orchestration patterns and approaches through natural language prompting. See more in [philosophy](docs-site/src/content/docs/philosophy.md)
 
-**NOTE** Currently this project is early and experimental. Most of the concepts are starting to settle in, but anything might break or change and the future is not set.
+**NOTE** Currently this project is early and experimental. Most of the concepts are settled in, but many features may not be fully implemented, anything might break or change and the future is not set. Local use is relatively stable, Hub based workflows are ~80% verified, Kubernetes runtime support and remote-git Groves are early and have rough edges.
 
 ## Key Features
 

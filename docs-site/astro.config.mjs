@@ -34,6 +34,7 @@ export default defineConfig({
 					items: [
 						{ label: 'Overview', slug: 'overview' },
 						{ label: 'Core Concepts', slug: 'concepts' },
+						{ label: 'Philosophy', slug: 'philosophy' },
 						{ label: 'Supported Harnesses', slug: 'supported-harnesses' },
 						{ label: 'Glossary', slug: 'glossary' },
 						{ label: 'Release Notes', slug: 'release-notes' },
