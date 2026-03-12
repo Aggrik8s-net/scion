@@ -1,7 +1,7 @@
 # Grove Shared Directories
 
 ## Status
-**Phase 1 Implemented** | March 2026
+**Phase 2 Implemented** | March 2026
 
 ## Problem Statement
 
@@ -145,6 +145,7 @@ Inject `SCION_VOLUMES=/scion-volumes` into agent environment so agents and scrip
 
 ### Phase 1: Core Implementation (Complete)
 
+
 #### 1. Config Changes
 
 Add `SharedDir` type to `pkg/api/types.go` and `SharedDirs []SharedDir` to the `Settings` struct in `pkg/config/settings.go`.
@@ -201,47 +202,34 @@ scion shared-dir info <name> [--grove <grove>]
 
 The `--grove` flag allows operating on a specific grove when not running from within a grove context (consistent with other `scion` subcommands).
 
-### Phase 2: Kubernetes Support
+### Phase 2: Kubernetes Support (Complete)
 
-For Kubernetes, local bind mounts are not supported. Shared directories require a different backing mechanism.
+For Kubernetes, local bind mounts are not supported. Shared directories use PersistentVolumeClaims (PVCs) as the backing mechanism.
 
 **Approach: PersistentVolumeClaim (PVC)**
 
-- When a grove has shared dirs and uses a Kubernetes runtime, create a PVC per shared dir (or one PVC with subdirectories)
+- When a grove has shared dirs and uses a Kubernetes runtime, a PVC is created per shared dir
 - PVC access mode: `ReadWriteMany` (RWX) — requires a storage class that supports it (e.g., NFS, GCE Filestore, EFS)
-- Mount the PVC at `/scion-volumes/<name>` (or `/workspace/.scion-volumes/<name>` for in-workspace dirs) in the pod spec
+- PVC names are deterministic and grove-scoped: `scion-shared-<grove>-<dir-name>`
+- PVCs are created before the pod (in `Run()`) and reused across agents in the same grove
+- PVCs are mounted at `/scion-volumes/<name>` (or `/workspace/.scion-volumes/<name>` for in-workspace dirs) in the pod spec
+- Local bind-mount volumes with shared dir targets are silently skipped in the K8s runtime (no warning)
+- `SharedDirs` are passed through `RunConfig` so the K8s runtime can create PVCs independently of the local volume mount synthesis
 
-```go
-// In k8s_runtime.go buildPod():
-for _, sd := range config.SharedDirs {
-    // Add PVC volume to pod spec
-    pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
-        Name: fmt.Sprintf("shared-%s", sd.Name),
-        VolumeSource: corev1.VolumeSource{
-            PersistentVolumeClaim: &corev1.PersistentVolumeClaim{
-                ClaimName: fmt.Sprintf("scion-shared-%s-%s", groveSlug, sd.Name),
-            },
-        },
-    })
-    // Add volume mount to container
-    container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-        Name:      fmt.Sprintf("shared-%s", sd.Name),
-        MountPath: target,  // /scion-volumes/<name> or /workspace/.scion-volumes/<name>
-        ReadOnly:  sd.ReadOnly,
-    })
-}
-```
-
-**PVC Lifecycle:**
-- Created when shared dir is declared and K8s runtime is active
+**Configuration:**
+- `KubernetesConfig` gained two new fields: `SharedDirStorageClass` and `SharedDirSize`
 - Storage class configurable via `settings.yaml`:
   ```yaml
   kubernetes:
     shared_dir_storage_class: "standard-rwx"
-    shared_dir_size: "10Gi"    # default size per shared dir
+    shared_dir_size: "10Gi"    # default size per shared dir (default: 10Gi)
   ```
+
+**PVC Lifecycle:**
+- Created on first agent start in a grove that declares shared dirs (idempotent — existing PVCs are reused)
 - PVCs persist across agent restarts (they are grove-scoped, not agent-scoped)
-- Deleted when shared dir is removed via CLI (with confirmation)
+- Grove-scoped cleanup available via `cleanupSharedDirPVCs()` — called during grove deletion, not agent deletion
+- PVCs are labeled with `scion.grove` and `scion.shared-dir` for lifecycle management
 
 **Alternative: EmptyDir (Ephemeral)**
 

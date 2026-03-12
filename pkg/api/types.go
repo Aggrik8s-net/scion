@@ -192,6 +192,8 @@ type KubernetesConfig struct {
 	NodeSelector       map[string]string `json:"nodeSelector,omitempty" yaml:"nodeSelector,omitempty"`
 	Tolerations        []K8sToleration   `json:"tolerations,omitempty" yaml:"tolerations,omitempty"`
 	ImagePullPolicy    string            `json:"imagePullPolicy,omitempty" yaml:"imagePullPolicy,omitempty"` // Always, IfNotPresent, Never
+	SharedDirStorageClass string         `json:"shared_dir_storage_class,omitempty" yaml:"shared_dir_storage_class,omitempty"` // Storage class for shared dir PVCs (must support RWX)
+	SharedDirSize         string         `json:"shared_dir_size,omitempty" yaml:"shared_dir_size,omitempty"`                  // Default size per shared dir PVC (e.g. "10Gi")
 }
 
 // K8sToleration mirrors corev1.Toleration for use in agent configuration

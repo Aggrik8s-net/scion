@@ -242,6 +242,13 @@ func (r *KubernetesRuntime) Run(ctx context.Context, config RunConfig) (string, 
 		}
 	}
 
+	// Create PVCs for shared directories (grove-scoped, reused across agents)
+	if len(config.SharedDirs) > 0 {
+		if err := r.createSharedDirPVCs(ctx, namespace, config); err != nil {
+			return "", fmt.Errorf("failed to create shared dir PVCs: %w", err)
+		}
+	}
+
 	pod, err := r.buildPod(namespace, config)
 	if err != nil {
 		return "", fmt.Errorf("failed to build pod spec: %w", err)
@@ -564,6 +571,106 @@ func (r *KubernetesRuntime) createAuthFileSecret(ctx context.Context, namespace,
 		return fmt.Errorf("failed to create auth secret: %w", err)
 	}
 	return nil
+}
+
+// sharedDirPVCName returns the deterministic PVC name for a grove shared directory.
+// PVCs are grove-scoped (not agent-scoped), so multiple agents share the same PVC.
+func sharedDirPVCName(groveName, dirName string) string {
+	return fmt.Sprintf("scion-shared-%s-%s", groveName, dirName)
+}
+
+// defaultSharedDirSize is the default PVC size when not specified in settings.
+const defaultSharedDirSize = "10Gi"
+
+// createSharedDirPVCs ensures PVCs exist for all declared shared directories.
+// PVCs are grove-scoped and persist across agent restarts. If a PVC already
+// exists (from a previous agent in the same grove), it is reused.
+func (r *KubernetesRuntime) createSharedDirPVCs(ctx context.Context, namespace string, config RunConfig) error {
+	if len(config.SharedDirs) == 0 {
+		return nil
+	}
+
+	groveName := config.Labels["scion.grove"]
+	if groveName == "" {
+		return fmt.Errorf("cannot create shared dir PVCs: missing scion.grove label")
+	}
+
+	storageClass := ""
+	size := defaultSharedDirSize
+	if config.Kubernetes != nil {
+		if config.Kubernetes.SharedDirStorageClass != "" {
+			storageClass = config.Kubernetes.SharedDirStorageClass
+		}
+		if config.Kubernetes.SharedDirSize != "" {
+			size = config.Kubernetes.SharedDirSize
+		}
+	}
+
+	storageQuantity, err := parseResourceSafe(size, "shared_dir_size")
+	if err != nil {
+		return err
+	}
+
+	for _, sd := range config.SharedDirs {
+		pvcName := sharedDirPVCName(groveName, sd.Name)
+
+		// Check if PVC already exists (grove-scoped, may have been created by another agent)
+		_, err := r.Client.Clientset.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, pvcName, metav1.GetOptions{})
+		if err == nil {
+			runtimeLog.Info("Shared dir PVC already exists, reusing", "pvc", pvcName, "shared_dir", sd.Name)
+			continue
+		}
+
+		accessMode := corev1.ReadWriteMany
+		pvc := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      pvcName,
+				Namespace: namespace,
+				Labels: map[string]string{
+					"scion.grove":      groveName,
+					"scion.shared-dir": sd.Name,
+				},
+			},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{accessMode},
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceStorage: storageQuantity,
+					},
+				},
+			},
+		}
+
+		if storageClass != "" {
+			pvc.Spec.StorageClassName = &storageClass
+		}
+
+		runtimeLog.Info("Creating shared dir PVC", "pvc", pvcName, "shared_dir", sd.Name, "size", size)
+		if _, err := r.Client.Clientset.CoreV1().PersistentVolumeClaims(namespace).Create(ctx, pvc, metav1.CreateOptions{}); err != nil {
+			return fmt.Errorf("failed to create shared dir PVC %q: %w", pvcName, err)
+		}
+	}
+
+	return nil
+}
+
+// cleanupSharedDirPVCs removes PVCs for shared directories belonging to a grove.
+// This is called during grove deletion, not agent deletion, since PVCs are grove-scoped.
+func (r *KubernetesRuntime) cleanupSharedDirPVCs(ctx context.Context, namespace, groveName string) {
+	selector := fmt.Sprintf("scion.grove=%s,scion.shared-dir", groveName)
+	pvcList, err := r.Client.Clientset.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: selector,
+	})
+	if err != nil {
+		runtimeLog.Warn("Failed to list shared dir PVCs for cleanup", "grove", groveName, "error", err)
+		return
+	}
+	for _, pvc := range pvcList.Items {
+		runtimeLog.Info("Deleting shared dir PVC", "pvc", pvc.Name, "grove", groveName)
+		if err := r.Client.Clientset.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, pvc.Name, metav1.DeleteOptions{}); err != nil {
+			runtimeLog.Warn("Failed to delete shared dir PVC", "pvc", pvc.Name, "error", err)
+		}
+	}
 }
 
 func (r *KubernetesRuntime) buildPod(namespace string, config RunConfig) (*corev1.Pod, error) {
@@ -914,6 +1021,36 @@ func (r *KubernetesRuntime) buildPod(namespace string, config RunConfig) (*corev
 		}
 	}
 
+	// Process shared directories — create PVC-backed volumes and mounts.
+	// Build a set of shared dir targets so we can skip them in the regular volume loop.
+	sharedDirTargets := make(map[string]bool, len(config.SharedDirs))
+	for i, sd := range config.SharedDirs {
+		target := fmt.Sprintf("/scion-volumes/%s", sd.Name)
+		if sd.InWorkspace {
+			target = fmt.Sprintf("/workspace/.scion-volumes/%s", sd.Name)
+		}
+		sharedDirTargets[target] = true
+
+		groveName := config.Labels["scion.grove"]
+		pvcName := sharedDirPVCName(groveName, sd.Name)
+		volName := fmt.Sprintf("shared-dir-%d", i)
+
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+			Name: volName,
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: pvcName,
+					ReadOnly:  sd.ReadOnly,
+				},
+			},
+		})
+		pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{
+			Name:      volName,
+			MountPath: target,
+			ReadOnly:  sd.ReadOnly,
+		})
+	}
+
 	// Process Volumes
 	type gcsVolInfo struct {
 		Source string `json:"source"`
@@ -963,6 +1100,10 @@ func (r *KubernetesRuntime) buildPod(namespace string, config RunConfig) (*corev
 				Prefix: v.Prefix,
 			})
 		default:
+			// Skip shared dir volumes — they are handled via PVCs above.
+			if sharedDirTargets[v.Target] {
+				continue
+			}
 			// Local/bind-mount volumes are not supported on Kubernetes.
 			// Log explicitly rather than silently ignoring.
 			volType := v.Type

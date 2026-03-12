@@ -692,7 +692,13 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 			}
 			return nil
 		}(),
-		GitClone:   opts.GitClone,
+		GitClone: opts.GitClone,
+		SharedDirs: func() []api.SharedDir {
+			if settings != nil {
+				return settings.SharedDirs
+			}
+			return nil
+		}(),
 		BrokerMode: opts.BrokerMode,
 		Debug:      util.DebugEnabled(),
 		Resume:     opts.Resume,

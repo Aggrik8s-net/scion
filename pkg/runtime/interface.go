@@ -42,6 +42,7 @@ type RunConfig struct {
 	Resources        *api.ResourceSpec
 	Kubernetes      *api.KubernetesConfig
 	GitClone        *api.GitCloneConfig
+	SharedDirs      []api.SharedDir
 	BrokerMode      bool
 	Debug           bool
 }
