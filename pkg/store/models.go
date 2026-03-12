@@ -98,6 +98,7 @@ type AgentAppliedConfig struct {
 	Profile string            `json:"profile,omitempty"`   // Settings profile for the runtime broker
 	Task    string            `json:"task,omitempty"`      // Initial task/prompt for the agent
 	Attach  bool              `json:"attach,omitempty"`    // If true, signals interactive attach mode to the broker/harness
+	Branch  string            `json:"branch,omitempty"`    // Git branch name (defaults to agent slug if empty)
 	Workspace string          `json:"workspace,omitempty"` // Host path to mount as /workspace (overrides default grove root)
 	GitClone  *api.GitCloneConfig `json:"gitClone,omitempty"`
 

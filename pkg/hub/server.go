@@ -302,6 +302,7 @@ type RemoteAgentConfig struct {
 	HarnessConfig string   `json:"harnessConfig,omitempty"` // Resolved harness config name for env-gather
 	HarnessAuth   string   `json:"harnessAuth,omitempty"`   // Late-binding override for auth_selected_type
 	Profile       string   `json:"profile,omitempty"`       // Settings profile for the runtime broker
+	Branch        string   `json:"branch,omitempty"`        // Git branch name (defaults to agent slug if empty)
 
 	// TemplateID is the Hub template ID for cache lookup on the Runtime Broker.
 	// When provided, the Runtime Broker can use this to fetch the template

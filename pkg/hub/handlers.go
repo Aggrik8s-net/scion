@@ -6348,6 +6348,7 @@ func (s *Server) buildAppliedConfig(req CreateAgentRequest, harnessConfig string
 		HarnessAuth:   req.HarnessAuth,
 		Task:          req.Task,
 		Attach:        req.Attach,
+		Branch:        req.Branch,
 		Workspace:     req.Workspace,
 		CreatorName:   creatorName,
 	}

@@ -574,6 +574,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		opts.Task = req.Config.Task
 		opts.Workspace = req.Config.Workspace
 		opts.Profile = req.Config.Profile
+		opts.Branch = req.Config.Branch
 	}
 
 	// Pass through inline ScionConfig for provisioning

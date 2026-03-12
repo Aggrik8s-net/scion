@@ -73,6 +73,9 @@ export class ScionPageAgentCreate extends LitElement {
   private profile = '';
 
   @state()
+  private branch = '';
+
+  @state()
   private task = '';
 
   @state()
@@ -407,6 +410,9 @@ export class ScionPageAgentCreate extends LitElement {
         notify: this.notify,
       };
 
+      if (this.branch.trim()) {
+        body.branch = this.branch.trim();
+      }
       if (this.harnessAuth) {
         body.harnessAuth = this.harnessAuth;
       }
@@ -516,6 +522,9 @@ export class ScionPageAgentCreate extends LitElement {
         provisionOnly: true,
       };
 
+      if (this.branch.trim()) {
+        body.branch = this.branch.trim();
+      }
       if (this.harnessAuth) {
         body.harnessAuth = this.harnessAuth;
       }
@@ -723,6 +732,19 @@ export class ScionPageAgentCreate extends LitElement {
               }}
               required
             ></sl-input>
+          </div>
+
+          <div class="form-field">
+            <label for="branch">Branch</label>
+            <sl-input
+              id="branch"
+              placeholder="defaults to agent name"
+              .value=${this.branch}
+              @sl-input=${(e: Event) => {
+                this.branch = (e.target as HTMLElement & { value: string }).value;
+              }}
+            ></sl-input>
+            <div class="hint">Git branch for this agent's worktree.</div>
           </div>
 
           <div class="form-field">
