@@ -97,6 +97,49 @@ type AgentK8sMetadata struct {
 	SyncedAt  string `json:"syncedAt,omitempty"`
 }
 
+// SharedDir defines a grove-level shared directory available to all agents.
+type SharedDir struct {
+	Name        string `json:"name" yaml:"name"`
+	ReadOnly    bool   `json:"read_only,omitempty" yaml:"read_only,omitempty"`
+	InWorkspace bool   `json:"in_workspace,omitempty" yaml:"in_workspace,omitempty"`
+}
+
+// ValidateSharedDirs validates a slice of SharedDir entries.
+func ValidateSharedDirs(dirs []SharedDir) error {
+	seen := make(map[string]bool, len(dirs))
+	for i, d := range dirs {
+		if d.Name == "" {
+			return fmt.Errorf("shared_dirs[%d]: missing required field: name", i)
+		}
+		if !isValidSlug(d.Name) {
+			return fmt.Errorf("shared_dirs[%d]: invalid name %q (must be lowercase alphanumeric with hyphens, e.g. \"build-cache\")", i, d.Name)
+		}
+		if seen[d.Name] {
+			return fmt.Errorf("shared_dirs[%d]: duplicate name %q", i, d.Name)
+		}
+		seen[d.Name] = true
+	}
+	return nil
+}
+
+// isValidSlug checks that a name is a valid slug: lowercase alphanumeric with hyphens,
+// starting and ending with alphanumeric, at least 1 character.
+func isValidSlug(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for i, c := range s {
+		if c >= 'a' && c <= 'z' || c >= '0' && c <= '9' {
+			continue
+		}
+		if c == '-' && i > 0 && i < len(s)-1 {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 type VolumeMount struct {
 	Source   string `json:"source" yaml:"source"`
 	Target   string `json:"target" yaml:"target"`

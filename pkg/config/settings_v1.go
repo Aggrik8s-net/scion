@@ -230,6 +230,7 @@ type VersionedSettings struct {
 	WorkspacePath   string                          `json:"workspace_path,omitempty" yaml:"workspace_path,omitempty" koanf:"workspace_path"`
 	HarnessConfigs  map[string]HarnessConfigEntry   `json:"harness_configs,omitempty" yaml:"harness_configs,omitempty" koanf:"harness_configs"`
 	Profiles        map[string]V1ProfileConfig      `json:"profiles,omitempty" yaml:"profiles,omitempty" koanf:"profiles"`
+	SharedDirs      []api.SharedDir                 `json:"shared_dirs,omitempty" yaml:"shared_dirs,omitempty" koanf:"shared_dirs"`
 }
 
 // V1ServerConfig holds server-side configuration in the versioned settings format.

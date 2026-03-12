@@ -613,6 +613,22 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 		finalScionCfg != nil && finalScionCfg.Telemetry != nil,
 		finalScionCfg != nil && finalScionCfg.Telemetry != nil && finalScionCfg.Telemetry.Cloud != nil)
 
+	// Inject shared directory volumes from grove settings
+	var sharedDirVolumes []api.VolumeMount
+	if settings != nil && len(settings.SharedDirs) > 0 {
+		if err := config.EnsureSharedDirs(projectDir, settings.SharedDirs); err != nil {
+			util.Debugf("Start: failed to ensure shared dirs: %v", err)
+		}
+		sdVolumes, err := config.SharedDirsToVolumeMounts(projectDir, settings.SharedDirs)
+		if err != nil {
+			util.Debugf("Start: failed to resolve shared dir volumes: %v", err)
+		} else {
+			sharedDirVolumes = sdVolumes
+			// Add SCION_VOLUMES env var for discoverability
+			opts.Env["SCION_VOLUMES"] = "/scion-volumes"
+		}
+	}
+
 	runCfg := runtime.RunConfig{
 		Name:             opts.Name,
 		Template:         template,
@@ -649,16 +665,20 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 		Env:             agentEnv,
 		ResolvedSecrets: opts.ResolvedSecrets,
 		Volumes: func() []api.VolumeMount {
-			if finalScionCfg == nil {
-				return nil
+			var volumes []api.VolumeMount
+			if finalScionCfg != nil {
+				// If we extracted effectiveWorkspace from a /workspace volume mount,
+				// filter it out to avoid a duplicate mount (the buildCommonRunArgs
+				// will handle the workspace mount properly with worktree support).
+				if effectiveWorkspace != "" && effectiveWorkspace != agentWorkspace {
+					volumes = filterWorkspaceVolume(finalScionCfg.Volumes)
+				} else {
+					volumes = finalScionCfg.Volumes
+				}
 			}
-			// If we extracted effectiveWorkspace from a /workspace volume mount,
-			// filter it out to avoid a duplicate mount (the buildCommonRunArgs
-			// will handle the workspace mount properly with worktree support).
-			if effectiveWorkspace != "" && effectiveWorkspace != agentWorkspace {
-				return filterWorkspaceVolume(finalScionCfg.Volumes)
-			}
-			return finalScionCfg.Volumes
+			// Append shared directory volumes
+			volumes = append(volumes, sharedDirVolumes...)
+			return volumes
 		}(),
 		Resources: func() *api.ResourceSpec {
 			if finalScionCfg != nil {
