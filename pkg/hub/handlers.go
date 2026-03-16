@@ -2143,7 +2143,10 @@ func (s *Server) createGrove(w http.ResponseWriter, r *http.Request) {
 	if req.ID != "" {
 		existing, err := s.store.GetGrove(ctx, req.ID)
 		if err == nil {
-			// Grove already exists — return it as-is (idempotent)
+			// Grove already exists — ensure associated groups exist (backfill for
+			// groves created before group support was added).
+			s.createGroveGroup(ctx, existing)
+			s.createGroveMembersGroupAndPolicy(ctx, existing)
 			writeJSON(w, http.StatusOK, existing)
 			return
 		}
@@ -2547,6 +2550,11 @@ func (s *Server) handleGroveRegister(w http.ResponseWriter, r *http.Request) {
 
 		// Auto-link brokers that have auto_provide enabled
 		s.autoLinkProviders(ctx, grove)
+	} else {
+		// Existing grove — ensure associated groups exist (backfill for
+		// groves created before group support was added).
+		s.createGroveGroup(ctx, grove)
+		s.createGroveMembersGroupAndPolicy(ctx, grove)
 	}
 
 	// Handle broker linking - two paths:

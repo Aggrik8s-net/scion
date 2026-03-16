@@ -103,6 +103,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		migrationV26,
 		migrationV27,
 		migrationV28,
+		migrationV29,
 	}
 
 	// Create migrations table if not exists
@@ -689,6 +690,14 @@ ALTER TABLE users ADD COLUMN last_seen TIMESTAMP;
 // Stores grove-level shared directory configuration as JSON.
 const migrationV28 = `
 ALTER TABLE groves ADD COLUMN shared_dirs TEXT DEFAULT '';
+`
+
+// Migration V29: Add group_type and grove_id columns to groups table.
+// These enable filtering groups by type and grove association.
+const migrationV29 = `
+ALTER TABLE groups ADD COLUMN group_type TEXT NOT NULL DEFAULT 'explicit';
+ALTER TABLE groups ADD COLUMN grove_id TEXT DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_groups_grove ON groups(grove_id);
 `
 
 // Helper functions for JSON marshaling/unmarshaling
@@ -3375,10 +3384,12 @@ func (s *SQLiteStore) CreateGroup(ctx context.Context, group *store.Group) error
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO groups (id, name, slug, description, parent_id, labels, annotations, created_at, updated_at, created_by, owner_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO groups (id, name, slug, description, group_type, grove_id, parent_id, labels, annotations, created_at, updated_at, created_by, owner_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
-		group.ID, group.Name, group.Slug, group.Description, nullableString(group.ParentID),
+		group.ID, group.Name, group.Slug, group.Description,
+		group.GroupType, nullableString(group.GroveID),
+		nullableString(group.ParentID),
 		marshalJSON(group.Labels), marshalJSON(group.Annotations),
 		group.Created, group.Updated, group.CreatedBy, group.OwnerID,
 	)
@@ -3394,13 +3405,15 @@ func (s *SQLiteStore) CreateGroup(ctx context.Context, group *store.Group) error
 func (s *SQLiteStore) GetGroup(ctx context.Context, id string) (*store.Group, error) {
 	group := &store.Group{}
 	var labels, annotations string
-	var parentID sql.NullString
+	var parentID, groveID sql.NullString
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, slug, description, parent_id, labels, annotations, created_at, updated_at, created_by, owner_id
+		SELECT id, name, slug, description, group_type, grove_id, parent_id, labels, annotations, created_at, updated_at, created_by, owner_id
 		FROM groups WHERE id = ?
 	`, id).Scan(
-		&group.ID, &group.Name, &group.Slug, &group.Description, &parentID,
+		&group.ID, &group.Name, &group.Slug, &group.Description,
+		&group.GroupType, &groveID,
+		&parentID,
 		&labels, &annotations,
 		&group.Created, &group.Updated, &group.CreatedBy, &group.OwnerID,
 	)
@@ -3413,6 +3426,9 @@ func (s *SQLiteStore) GetGroup(ctx context.Context, id string) (*store.Group, er
 
 	if parentID.Valid {
 		group.ParentID = parentID.String
+	}
+	if groveID.Valid {
+		group.GroveID = groveID.String
 	}
 	unmarshalJSON(labels, &group.Labels)
 	unmarshalJSON(annotations, &group.Annotations)
@@ -3440,12 +3456,14 @@ func (s *SQLiteStore) UpdateGroup(ctx context.Context, group *store.Group) error
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE groups SET
-			name = ?, slug = ?, description = ?, parent_id = ?,
-			labels = ?, annotations = ?,
+			name = ?, slug = ?, description = ?, group_type = ?, grove_id = ?,
+			parent_id = ?, labels = ?, annotations = ?,
 			updated_at = ?, owner_id = ?
 		WHERE id = ?
 	`,
-		group.Name, group.Slug, group.Description, nullableString(group.ParentID),
+		group.Name, group.Slug, group.Description,
+		group.GroupType, nullableString(group.GroveID),
+		nullableString(group.ParentID),
 		marshalJSON(group.Labels), marshalJSON(group.Annotations),
 		group.Updated, group.OwnerID,
 		group.ID,
@@ -3491,6 +3509,14 @@ func (s *SQLiteStore) ListGroups(ctx context.Context, filter store.GroupFilter, 
 		conditions = append(conditions, "parent_id = ?")
 		args = append(args, filter.ParentID)
 	}
+	if filter.GroupType != "" {
+		conditions = append(conditions, "group_type = ?")
+		args = append(args, filter.GroupType)
+	}
+	if filter.GroveID != "" {
+		conditions = append(conditions, "grove_id = ?")
+		args = append(args, filter.GroveID)
+	}
 
 	whereClause := ""
 	if len(conditions) > 0 {
@@ -3509,7 +3535,7 @@ func (s *SQLiteStore) ListGroups(ctx context.Context, filter store.GroupFilter, 
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, name, slug, description, parent_id, labels, annotations, created_at, updated_at, created_by, owner_id
+		SELECT id, name, slug, description, group_type, grove_id, parent_id, labels, annotations, created_at, updated_at, created_by, owner_id
 		FROM groups %s ORDER BY created_at DESC LIMIT ?
 	`, whereClause)
 	args = append(args, limit)
@@ -3524,10 +3550,12 @@ func (s *SQLiteStore) ListGroups(ctx context.Context, filter store.GroupFilter, 
 	for rows.Next() {
 		var group store.Group
 		var labels, annotations string
-		var parentID sql.NullString
+		var parentID, groveID sql.NullString
 
 		if err := rows.Scan(
-			&group.ID, &group.Name, &group.Slug, &group.Description, &parentID,
+			&group.ID, &group.Name, &group.Slug, &group.Description,
+			&group.GroupType, &groveID,
+			&parentID,
 			&labels, &annotations,
 			&group.Created, &group.Updated, &group.CreatedBy, &group.OwnerID,
 		); err != nil {
@@ -3536,6 +3564,9 @@ func (s *SQLiteStore) ListGroups(ctx context.Context, filter store.GroupFilter, 
 
 		if parentID.Valid {
 			group.ParentID = parentID.String
+		}
+		if groveID.Valid {
+			group.GroveID = groveID.String
 		}
 		unmarshalJSON(labels, &group.Labels)
 		unmarshalJSON(annotations, &group.Annotations)
@@ -3770,7 +3801,16 @@ func (s *SQLiteStore) addTransitiveGroups(ctx context.Context, groupID string, v
 
 // GetGroupByGroveID retrieves the grove_agents group associated with a grove.
 func (s *SQLiteStore) GetGroupByGroveID(ctx context.Context, groveID string) (*store.Group, error) {
-	return nil, store.ErrNotFound
+	var id string
+	err := s.db.QueryRowContext(ctx, "SELECT id FROM groups WHERE grove_id = ? AND group_type = ? LIMIT 1",
+		groveID, store.GroupTypeGroveAgents).Scan(&id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, store.ErrNotFound
+		}
+		return nil, err
+	}
+	return s.GetGroup(ctx, id)
 }
 
 // GetEffectiveGroupsForAgent returns all groups an agent belongs to.
