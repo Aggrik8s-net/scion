@@ -213,14 +213,26 @@ func (s *Server) verifyGCPServiceAccount(w http.ResponseWriter, r *http.Request,
 	// Attempt to verify impersonation via the GCP token generator
 	if s.gcpTokenGenerator != nil {
 		if err := s.gcpTokenGenerator.VerifyImpersonation(r.Context(), sa.Email); err != nil {
+			// Persist the failure status
+			sa.Verified = false
+			sa.VerificationStatus = "failed"
+			sa.VerificationError = err.Error()
+			_ = s.store.UpdateGCPServiceAccount(r.Context(), sa)
+
+			details := map[string]interface{}{
+				"hubServiceAccountEmail": s.gcpTokenGenerator.ServiceAccountEmail(),
+				"targetEmail":            sa.Email,
+			}
 			writeError(w, http.StatusBadGateway, "gcp_verification_failed",
-				"Failed to verify impersonation: "+err.Error(), nil)
+				"Failed to verify impersonation: "+err.Error(), details)
 			return
 		}
 	}
 
 	sa.Verified = true
 	sa.VerifiedAt = time.Now()
+	sa.VerificationStatus = "verified"
+	sa.VerificationError = ""
 
 	if err := s.store.UpdateGCPServiceAccount(r.Context(), sa); err != nil {
 		writeErrorFromErr(w, err, "")

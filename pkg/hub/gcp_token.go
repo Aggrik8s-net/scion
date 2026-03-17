@@ -22,6 +22,10 @@ type GCPTokenGenerator interface {
 	GenerateAccessToken(ctx context.Context, serviceAccountEmail string, scopes []string) (*GCPAccessToken, error)
 	GenerateIDToken(ctx context.Context, serviceAccountEmail string, audience string) (*GCPIDToken, error)
 	VerifyImpersonation(ctx context.Context, serviceAccountEmail string) error
+	// ServiceAccountEmail returns the email of the Hub's own GCP service account
+	// used for impersonation. This is displayed in the UI when verification fails
+	// to help users grant the correct IAM role.
+	ServiceAccountEmail() string
 }
 
 // GCPAccessToken matches the GCE metadata server token response format.

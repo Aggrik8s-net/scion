@@ -855,10 +855,12 @@ type GCPServiceAccount struct {
 	ProjectID     string    `json:"project_id"`     // GCP project containing the SA
 	DisplayName   string    `json:"display_name"`   // Human-friendly label
 	DefaultScopes []string  `json:"default_scopes,omitempty"` // OAuth scopes (default: cloud-platform)
-	Verified      bool      `json:"verified"`       // Hub confirmed it can impersonate this SA
-	VerifiedAt    time.Time `json:"verified_at,omitempty"`
-	CreatedBy     string    `json:"created_by"`     // User who registered it
-	CreatedAt     time.Time `json:"created_at"`
+	Verified           bool      `json:"verified"`                      // Hub confirmed it can impersonate this SA
+	VerifiedAt         time.Time `json:"verified_at,omitempty"`
+	VerificationStatus string    `json:"verificationStatus,omitempty"`  // "unverified", "verified", "failed"
+	VerificationError  string    `json:"verificationError,omitempty"`   // Error message when verification failed
+	CreatedBy          string    `json:"created_by"`                    // User who registered it
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 // GCPIdentityConfig holds the GCP identity assignment for an agent.

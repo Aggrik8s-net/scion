@@ -51,10 +51,12 @@ type GCPServiceAccount struct {
 	ProjectID     string    `json:"project_id"`
 	DisplayName   string    `json:"display_name"`
 	DefaultScopes []string  `json:"default_scopes,omitempty"`
-	Verified      bool      `json:"verified"`
-	VerifiedAt    time.Time `json:"verified_at,omitempty"`
-	CreatedBy     string    `json:"created_by"`
-	CreatedAt     time.Time `json:"created_at"`
+	Verified           bool      `json:"verified"`
+	VerifiedAt         time.Time `json:"verified_at,omitempty"`
+	VerificationStatus string    `json:"verificationStatus,omitempty"`
+	VerificationError  string    `json:"verificationError,omitempty"`
+	CreatedBy          string    `json:"created_by"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 // CreateGCPServiceAccountRequest is the request for registering a GCP SA.

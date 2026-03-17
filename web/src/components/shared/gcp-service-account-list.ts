@@ -24,11 +24,7 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
-import type {
-  GCPServiceAccount,
-  GCPVerificationStatus,
-  Capabilities,
-} from '../../shared/types.js';
+import type { GCPServiceAccount, GCPVerificationStatus, Capabilities } from '../../shared/types.js';
 import { can } from '../../shared/types.js';
 import { apiFetch } from '../../client/api.js';
 import { resourceStyles } from './resource-styles.js';
@@ -55,6 +51,11 @@ export class ScionGCPServiceAccountList extends LitElement {
   @state() private verifyingId: string | null = null;
   @state() private deletingId: string | null = null;
 
+  // Verify-failed dialog state
+  @state() private verifyFailedOpen = false;
+  @state() private verifyFailedHubEmail = '';
+  @state() private verifyFailedTargetEmail = '';
+
   static override styles = [
     resourceStyles,
     css`
@@ -62,6 +63,37 @@ export class ScionGCPServiceAccountList extends LitElement {
         display: inline-flex;
         align-items: center;
         gap: 0.25rem;
+      }
+
+      .verify-failed-content {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .verify-failed-content p {
+        margin: 0;
+        line-height: 1.5;
+      }
+
+      .verify-failed-content code {
+        background: var(--sl-color-neutral-100, #f1f5f9);
+        padding: 0.125rem 0.375rem;
+        border-radius: 0.25rem;
+        font-size: 0.875em;
+        word-break: break-all;
+      }
+
+      .verify-failed-content .gcloud-command {
+        background: var(--sl-color-neutral-100, #f1f5f9);
+        padding: 0.75rem 1rem;
+        border-radius: 0.375rem;
+        font-family: monospace;
+        font-size: 0.8125rem;
+        line-height: 1.6;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        word-break: break-all;
       }
     `,
   ];
@@ -174,20 +206,41 @@ export class ScionGCPServiceAccountList extends LitElement {
       );
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(
-          errorData.message ||
-            'Verification failed. Ensure the Hub service account has serviceAccountTokenCreator role on this SA.'
-        );
+        const errorData = (await response.json().catch(() => ({}))) as {
+          error?: {
+            message?: string;
+            details?: { hubServiceAccountEmail?: string; targetEmail?: string };
+          };
+        };
+
+        const details = errorData?.error?.details;
+        if (details?.hubServiceAccountEmail) {
+          this.verifyFailedHubEmail = details.hubServiceAccountEmail;
+          this.verifyFailedTargetEmail = details.targetEmail || account.email;
+          this.verifyFailedOpen = true;
+        } else {
+          this.verifyFailedHubEmail = '';
+          this.verifyFailedTargetEmail = account.email;
+          this.verifyFailedOpen = true;
+        }
+
+        await this.loadAccounts();
+        return;
       }
 
       await this.loadAccounts();
     } catch (err) {
       console.error('Failed to verify service account:', err);
-      alert(err instanceof Error ? err.message : 'Verification failed');
+      this.verifyFailedHubEmail = '';
+      this.verifyFailedTargetEmail = account.email;
+      this.verifyFailedOpen = true;
     } finally {
       this.verifyingId = null;
     }
+  }
+
+  private closeVerifyFailedDialog(): void {
+    this.verifyFailedOpen = false;
   }
 
   private async handleDelete(account: GCPServiceAccount, event?: MouseEvent): Promise<void> {
@@ -297,6 +350,7 @@ export class ScionGCPServiceAccountList extends LitElement {
           `
         : ''}
       ${this.accounts.length === 0 ? this.renderEmpty() : this.renderTable()} ${this.renderDialog()}
+      ${this.renderVerifyFailedDialog()}
     `;
   }
 
@@ -334,7 +388,7 @@ export class ScionGCPServiceAccountList extends LitElement {
               ? this.renderEmpty()
               : this.renderTable()}
       </div>
-      ${this.renderDialog()}
+      ${this.renderDialog()} ${this.renderVerifyFailedDialog()}
     `;
   }
 
@@ -399,11 +453,7 @@ export class ScionGCPServiceAccountList extends LitElement {
     `;
   }
 
-  private renderStatus(
-    account: GCPServiceAccount,
-    isVerifying: boolean,
-    isDeleting: boolean
-  ) {
+  private renderStatus(account: GCPServiceAccount, isVerifying: boolean, isDeleting: boolean) {
     const status = this.getVerificationStatus(account);
 
     const badge =
@@ -411,9 +461,8 @@ export class ScionGCPServiceAccountList extends LitElement {
         ? html`<sl-badge variant="success">
             Verified
             ${account.verifiedAt
-              ? html`<sl-tooltip
-                  content="Verified ${this.formatRelativeTime(account.verifiedAt)}"
-                  ><span>\u2713</span></sl-tooltip
+              ? html`<sl-tooltip content="Verified ${this.formatRelativeTime(account.verifiedAt)}"
+                  ><span>✓</span></sl-tooltip
                 >`
               : ''}
           </sl-badge>`
@@ -526,6 +575,55 @@ export class ScionGCPServiceAccountList extends LitElement {
           @click=${this.handleAdd}
         >
           Add
+        </sl-button>
+      </sl-dialog>
+    `;
+  }
+
+  private renderVerifyFailedDialog() {
+    const gcloudCmd = this.verifyFailedHubEmail
+      ? `gcloud iam service-accounts add-iam-policy-binding \\
+  ${this.verifyFailedTargetEmail} \\
+  --member="serviceAccount:${this.verifyFailedHubEmail}" \\
+  --role="roles/iam.serviceAccountTokenCreator"`
+      : '';
+
+    return html`
+      <sl-dialog
+        label="Verification Failed"
+        ?open=${this.verifyFailedOpen}
+        @sl-request-close=${this.closeVerifyFailedDialog}
+      >
+        <div class="verify-failed-content">
+          <p>
+            The Hub could not impersonate the service account
+            <code>${this.verifyFailedTargetEmail}</code>.
+          </p>
+
+          ${this.verifyFailedHubEmail
+            ? html`
+                <p>
+                  The Hub's service account
+                  <code>${this.verifyFailedHubEmail}</code> needs the
+                  <strong>Service Account Token Creator</strong> role
+                  (<code>roles/iam.serviceAccountTokenCreator</code>) on the target service account.
+                </p>
+                <p>Run the following command to grant access:</p>
+                <div class="gcloud-command">${gcloudCmd}</div>
+              `
+            : html`
+                <p>
+                  Ensure the Hub's service account has the
+                  <strong>Service Account Token Creator</strong> role
+                  (<code>roles/iam.serviceAccountTokenCreator</code>) on this service account.
+                </p>
+              `}
+
+          <p>After granting the role, click the refresh icon to re-check verification.</p>
+        </div>
+
+        <sl-button slot="footer" variant="primary" @click=${this.closeVerifyFailedDialog}>
+          OK
         </sl-button>
       </sl-dialog>
     `;
