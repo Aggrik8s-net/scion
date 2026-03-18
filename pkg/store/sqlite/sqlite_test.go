@@ -856,6 +856,68 @@ func TestRuntimeBrokerList(t *testing.T) {
 	assert.Equal(t, 0, result.TotalCount)
 }
 
+func TestRuntimeBrokerListByGroveIncludesAutoProvide(t *testing.T) {
+	s := setupTestStore(t)
+	ctx := context.Background()
+
+	// Create a grove
+	grove := &store.Grove{
+		ID:      "grove-autoprovide-test",
+		Slug:    "autoprovide-test",
+		Name:    "AutoProvide Test",
+		Created: time.Now(),
+		Updated: time.Now(),
+	}
+	require.NoError(t, s.CreateGrove(ctx, grove))
+
+	// Create a regular broker explicitly linked to the grove
+	linkedBroker := &store.RuntimeBroker{
+		ID:     "broker-linked",
+		Name:   "Linked Broker",
+		Slug:   "linked-broker",
+		Status: store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.CreateRuntimeBroker(ctx, linkedBroker))
+	require.NoError(t, s.AddGroveProvider(ctx, &store.GroveProvider{
+		GroveID:    grove.ID,
+		BrokerID:   linkedBroker.ID,
+		BrokerName: linkedBroker.Name,
+		Status:     store.BrokerStatusOnline,
+	}))
+
+	// Create an auto-provide broker (NOT explicitly linked to the grove)
+	autoBroker := &store.RuntimeBroker{
+		ID:          "broker-auto",
+		Name:        "Auto Broker",
+		Slug:        "auto-broker",
+		Status:      store.BrokerStatusOnline,
+		AutoProvide: true,
+	}
+	require.NoError(t, s.CreateRuntimeBroker(ctx, autoBroker))
+
+	// Create a regular broker NOT linked to the grove
+	unlinkedBroker := &store.RuntimeBroker{
+		ID:     "broker-unlinked",
+		Name:   "Unlinked Broker",
+		Slug:   "unlinked-broker",
+		Status: store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.CreateRuntimeBroker(ctx, unlinkedBroker))
+
+	// List brokers for the grove — should include linked + auto-provide, but not unlinked
+	result, err := s.ListRuntimeBrokers(ctx, store.RuntimeBrokerFilter{GroveID: grove.ID}, store.ListOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 2, result.TotalCount)
+
+	ids := make(map[string]bool)
+	for _, b := range result.Items {
+		ids[b.ID] = true
+	}
+	assert.True(t, ids["broker-linked"], "linked broker should be included")
+	assert.True(t, ids["broker-auto"], "auto-provide broker should be included")
+	assert.False(t, ids["broker-unlinked"], "unlinked broker should not be included")
+}
+
 // ============================================================================
 // Template Tests
 // ============================================================================

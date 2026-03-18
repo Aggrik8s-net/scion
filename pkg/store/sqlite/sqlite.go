@@ -1486,7 +1486,11 @@ func (s *SQLiteStore) GetGrove(ctx context.Context, id string) (*store.Grove, er
 
 	// Populate computed fields
 	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM agents WHERE grove_id = ?", id).Scan(&grove.AgentCount)
-	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM grove_contributors WHERE grove_id = ? AND status = 'online'", id).Scan(&grove.ActiveBrokerCount)
+	s.db.QueryRowContext(ctx, `
+		SELECT (SELECT COUNT(*) FROM grove_contributors WHERE grove_id = ? AND status = 'online')
+		     + (SELECT COUNT(*) FROM runtime_brokers WHERE auto_provide = 1 AND status = 'online'
+		            AND id NOT IN (SELECT broker_id FROM grove_contributors WHERE grove_id = ?))
+	`, id, id).Scan(&grove.ActiveBrokerCount)
 	s.populateGroveType(ctx, grove)
 
 	return grove, nil
@@ -1683,7 +1687,11 @@ func (s *SQLiteStore) ListGroves(ctx context.Context, filter store.GroveFilter, 
 
 		// Populate computed fields - these now have a connection available
 		s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM agents WHERE grove_id = ?", grove.ID).Scan(&grove.AgentCount)
-		s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM grove_contributors WHERE grove_id = ? AND status = 'online'", grove.ID).Scan(&grove.ActiveBrokerCount)
+		s.db.QueryRowContext(ctx, `
+			SELECT (SELECT COUNT(*) FROM grove_contributors WHERE grove_id = ? AND status = 'online')
+			     + (SELECT COUNT(*) FROM runtime_brokers WHERE auto_provide = 1 AND status = 'online'
+			            AND id NOT IN (SELECT broker_id FROM grove_contributors WHERE grove_id = ?))
+		`, grove.ID, grove.ID).Scan(&grove.ActiveBrokerCount)
 		s.populateGroveType(ctx, &grove)
 
 		groves = append(groves, grove)
@@ -1841,7 +1849,7 @@ func (s *SQLiteStore) ListRuntimeBrokers(ctx context.Context, filter store.Runti
 		args = append(args, filter.Status)
 	}
 	if filter.GroveID != "" {
-		conditions = append(conditions, "id IN (SELECT broker_id FROM grove_contributors WHERE grove_id = ?)")
+		conditions = append(conditions, "(id IN (SELECT broker_id FROM grove_contributors WHERE grove_id = ?) OR auto_provide = 1)")
 		args = append(args, filter.GroveID)
 	}
 	if filter.Name != "" {
