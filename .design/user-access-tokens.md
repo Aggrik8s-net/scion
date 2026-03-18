@@ -254,10 +254,11 @@ Add a **"Access Tokens"** page to the profile section:
 10. ✅ **Add auth-type to request logging**: Include the authentication method (JWT, UAT, dev-token) in standard request log entries
 11. ✅ Register API handlers on the server router
 
-#### Phase 2: CLI Commands
+#### Phase 2: CLI Commands ✅
 
-1. Add `cmd/hub_token.go` with `scion hub token {create,list,revoke,delete}` subcommands
-2. Add hubclient methods for token CRUD
+1. ✅ Add `cmd/hub_token.go` with `scion hub token {create,list,revoke,delete}` subcommands
+2. ✅ Add hubclient `TokenService` interface and implementation in `pkg/hubclient/tokens.go`
+3. ✅ Register `Tokens()` on the `Client` interface in `pkg/hubclient/client.go`
 
 #### Phase 3: Web UI
 
