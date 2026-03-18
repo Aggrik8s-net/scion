@@ -512,16 +512,16 @@ The design places commands under `scion notifications` (top-level). An alternati
 6. Wire up SSE events for real-time subscription state updates (deferred — optional)
 7. ✅ Add scope indicator styles to notification tray (scope data in notification payloads deferred to Phase 4)
 
-### Phase 4: Polish & Extensions (Future)
+### Phase 4: Polish & Extensions ✅ COMPLETE
 **Goal**: Refinements based on usage feedback.
 
 **Tasks:**
-1. Subscription editing (PATCH trigger activities)
-2. `DELETED` trigger activity for agent deletion events
-3. Subscription limits / rate limiting
-4. Bulk subscribe/unsubscribe operations
-5. Subscription templates (pre-configured activity sets for common patterns)
-6. Email notification channel integration
+1. ✅ Subscription editing (PATCH trigger activities) — store, hub handler, client, CLI `update` command, web inline edit
+2. ✅ `DELETED` trigger activity for agent deletion events — dispatcher listens for deletion events, fires before cascade
+3. ✅ Subscription limits / rate limiting — configurable `MaxSubscriptionsPerUser` in ServerConfig
+4. ✅ Bulk subscribe/unsubscribe operations — `POST /subscriptions/bulk` and `POST /subscriptions/bulk-delete`
+5. ✅ Subscription templates — new model, migration, store CRUD, API endpoints, hub client, web template selector
+6. ✅ Email notification channel integration — SMTP-based `EmailChannel` registered in channel factory
 
 ---
 
