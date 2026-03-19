@@ -23,12 +23,10 @@
 
 set -euo pipefail
 
-INSTANCE_NAME="scion-demo"
-ZONE=${ZONE:-"us-central1-a"}
-PROJECT_ID=${PROJECT_ID:-"deploy-demo-test"}
-DOMAIN="hub.demo.scion-ai.dev"
-REPO_DIR="/home/scion/scion"
-SCION_BIN="/usr/local/bin/scion"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/hub-config.sh"
+
+DOMAIN="${HUB_DOMAIN}"
 RESET_DB=false
 FULL_DEPLOY=false
 
@@ -121,16 +119,21 @@ if $FULL_DEPLOY; then
 
     # hub.env
     HAS_HUB_ENV=false
-    if [ -f ".scratch/hub.env" ]; then
-        cp ".scratch/hub.env" "$UPLOAD_DIR/hub.env"
+    if [ -f "${HUB_ENV_FILE}" ]; then
+        cp "${HUB_ENV_FILE}" "$UPLOAD_DIR/hub.env"
         HAS_HUB_ENV=true
         substep "Prepared hub.env"
     fi
 
     # settings.yaml
-    cat <<'SETTINGS_EOF' > "$UPLOAD_DIR/scion-settings.yaml"
+    if [[ "${ENABLE_GKE}" == "true" ]]; then
+        DEFAULT_RUNTIME="kubernetes"
+    else
+        DEFAULT_RUNTIME="docker"
+    fi
+    cat <<SETTINGS_EOF > "$UPLOAD_DIR/scion-settings.yaml"
 schema_version: "1"
-default_runtime: kubernetes
+default_runtime: ${DEFAULT_RUNTIME}
 server:
   mode: production
 telemetry:
@@ -161,6 +164,10 @@ SETTINGS_EOF
     substep "Prepared settings.yaml"
 
     # systemd service file
+    BROKER_FLAGS=""
+    if [[ "${ENABLE_GKE}" == "true" ]]; then
+        BROKER_FLAGS=" --enable-runtime-broker --runtime-broker-port 9800"
+    fi
     printf "[Unit]
 Description=Scion Hub API Server
 After=network.target
@@ -175,21 +182,21 @@ Environment=\"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\
 StandardOutput=journal
 StandardError=journal
 ExecStartPre=/usr/bin/env
-ExecStart=%s --global server start --foreground --production --debug --enable-hub --enable-runtime-broker --enable-web --runtime-broker-port 9800 --web-port 8080 --storage-bucket \${SCION_HUB_STORAGE_BUCKET} --session-secret \${SESSION_SECRET} --auto-provide
+ExecStart=%s --global server start --foreground --production --debug --enable-hub%s --enable-web --web-port 8080 --storage-bucket \${SCION_HUB_STORAGE_BUCKET} --session-secret \${SESSION_SECRET} --auto-provide
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-" "${REPO_DIR}" "${SCION_BIN}" > "$UPLOAD_DIR/scion-hub.service"
+" "${REPO_DIR}" "${SCION_BIN}" "${BROKER_FLAGS}" > "$UPLOAD_DIR/scion-hub.service"
     substep "Prepared systemd unit file"
 
     # Caddyfile
     cat <<EOF > "$UPLOAD_DIR/Caddyfile"
-hub.demo.scion-ai.dev {
+${HUB_DOMAIN} {
     # In combined mode, Hub API and Web UI are served on a single port
     reverse_proxy localhost:8080
-    tls /etc/letsencrypt/live/demo.scion-ai.dev/fullchain.pem /etc/letsencrypt/live/demo.scion-ai.dev/privkey.pem
+    tls /etc/letsencrypt/live/${CERT_DOMAIN}/fullchain.pem /etc/letsencrypt/live/${CERT_DOMAIN}/privkey.pem
 }
 EOF
     substep "Prepared Caddyfile"
@@ -270,8 +277,8 @@ if $FULL_DEPLOY; then
         echo "  -> Caddyfile unchanged"
     fi
 
-    # Install kubectl if missing
-    if ! command -v kubectl &>/dev/null; then
+    # Install kubectl if missing (only needed with GKE)
+    if [ "$ENABLE_GKE" = "true" ] && ! command -v kubectl &>/dev/null; then
         echo "  -> Installing kubectl..."
         sudo apt-get update && sudo apt-get install -y kubectl || sudo snap install kubectl --classic || echo "  -> Failed to install kubectl automatically"
     fi
@@ -284,6 +291,7 @@ gcloud compute ssh "${INSTANCE_NAME}" --zone="${ZONE}" --command '
     set -euo pipefail
     RESET_DB='"${RESET_DB}"'
     FULL_DEPLOY='"${FULL_DEPLOY}"'
+    ENABLE_GKE='"${ENABLE_GKE}"'
     REMOTE_START=$SECONDS
 
     '"${FULL_REMOTE_COMMANDS}"'
@@ -309,11 +317,11 @@ gcloud compute ssh "${INSTANCE_NAME}" --zone="${ZONE}" --command '
     sudo -u scion sh -c "cd /home/scion/scion && /usr/local/go/bin/go build -o scion ./cmd/scion"
     echo "  -> Binary build took $(( SECONDS - BUILD_START ))s"
 
-    # Configure GKE credentials if full deploy
-    if [ "$FULL_DEPLOY" = "true" ]; then
+    # Configure GKE credentials if full deploy with GKE enabled
+    if [ "$FULL_DEPLOY" = "true" ] && [ "$ENABLE_GKE" = "true" ]; then
         echo ""
         echo "==> Configuring GKE credentials..."
-        sudo -u scion sh -c "gcloud container clusters get-credentials scion-demo-cluster --region us-central1 --project deploy-demo-test || true"
+        sudo -u scion sh -c "gcloud container clusters get-credentials '"${CLUSTER_NAME}"' --region '"${REGION}"' --project '"${PROJECT_ID}"' || true"
     fi
 
     # Stop existing service

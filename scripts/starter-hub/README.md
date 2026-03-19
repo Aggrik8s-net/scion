@@ -8,14 +8,36 @@ Scripts for provisioning and operating a Scion Hub on a Google Compute Engine VM
 - GitHub CLI (`gh`) authenticated (for deploy key setup)
 - A registered domain with DNS delegated to Cloud DNS (see `gce-certs.sh`)
 
+## Configuration
+
+All scripts source `hub-config.sh`, which derives resource names, domains, and
+file paths from two primary variables:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `HUB_NAME` | `demo` | Deployment name — drives GCE instance, SA, firewall rule, cluster, and DNS names |
+| `BASE_DOMAIN` | `scion-ai.dev` | Root domain — combined with `HUB_NAME` to form `hub.<name>.<base>` |
+| `ENABLE_GKE` | `false` | Set to `true` to provision a GKE cluster, grant `container.admin`, configure credentials, and use Kubernetes as the default runtime. |
+
+To stand up a second hub (e.g., "staging"):
+
+```bash
+export HUB_NAME=staging
+# All scripts now target scion-staging, hub.staging.scion-ai.dev, etc.
+```
+
+Any derived variable can also be overridden individually via the environment.
+See `hub-config.sh` for the full list.
+
 ## Environment Setup
 
 1. Copy the sample env file and fill in your values:
 
    ```bash
    mkdir -p .scratch
-   cp scripts/starter-hub/hub.env.sample .scratch/hub.env
-   # Edit .scratch/hub.env with your secrets
+   cp scripts/starter-hub/hub.env.sample .scratch/hub-demo.env
+   # Edit .scratch/hub-demo.env with your secrets
+   # For a second hub: cp hub.env.sample .scratch/hub-staging.env
    ```
 
 2. Configure OAuth credentials for Google and/or GitHub. See the
@@ -87,4 +109,5 @@ the telemetry service account.
 | `gce-certs.sh` | Cloud DNS setup and Let's Encrypt wildcard certificates |
 | `gce-demo-cloud-init.yaml` | Cloud-init config installed on the VM at provision time |
 | `gce-setup-nats.sh` | *(Archived)* Standalone NATS server setup — superseded by in-process events |
-| `hub.env.sample` | Template for the environment file (copy to `.scratch/hub.env`) |
+| `hub-config.sh` | Shared configuration — all scripts source this for parameterized naming |
+| `hub.env.sample` | Template for the environment file (copy to `.scratch/hub-<name>.env`) |

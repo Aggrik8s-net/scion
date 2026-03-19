@@ -17,14 +17,14 @@
 
 set -euo pipefail
 
-DOMAIN="demo.scion-ai.dev"
-HUB_SUBDOMAIN="hub.demo.scion-ai.dev"
-ZONE_NAME="demo-scion-ai-dev"
-INSTANCE_NAME="scion-demo"
-GCE_ZONE="us-central1-a"
-EMAIL="ptone@google.com"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/hub-config.sh"
 
-PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
+DOMAIN="${CERT_DOMAIN}"
+HUB_SUBDOMAIN="${HUB_DOMAIN}"
+ZONE_NAME="${DNS_ZONE_NAME}"
+GCE_ZONE="${ZONE}"
+EMAIL="${CERT_EMAIL}"
 
 if [[ -z "$PROJECT_ID" ]]; then
     echo "Error: PROJECT_ID is not set and could not be determined from gcloud config."

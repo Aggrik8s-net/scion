@@ -17,7 +17,10 @@
 
 set -euo pipefail
 
-echo "=== Scion Demo Full Deployment ==="
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/hub-config.sh"
+
+echo "=== Scion Hub Full Deployment: ${HUB_NAME} ==="
 
 # Step 1: Provision Infrastructure
 echo ""
@@ -41,7 +44,7 @@ echo "--- Step 4: Building and Starting Hub ---"
 
 echo ""
 echo "=== Full Deployment Complete ==="
-echo "Your Scion Hub should now be available at https://hub.demo.scion-ai.dev"
+echo "Your Scion Hub should now be available at https://${HUB_DOMAIN}"
 echo ""
 echo "Note: To enable agent telemetry, upload the GCP credentials key to the Hub:"
 echo "  scion secret set scion-telemetry-gcp-credentials \\"

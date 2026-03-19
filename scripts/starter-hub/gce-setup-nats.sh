@@ -22,8 +22,8 @@
 
 set -euo pipefail
 
-INSTANCE_NAME="scion-demo"
-ZONE="us-central1-a"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/hub-config.sh"
 
 # --- Create systemd unit file ---
 TMP_SERVICE=$(mktemp)
@@ -57,13 +57,13 @@ EOF
 
 # --- Create NATS config file ---
 TMP_CONF=$(mktemp)
-cat <<'EOF' > "$TMP_CONF"
-# /etc/nats-server.conf - Scion Demo NATS Server Configuration
+cat <<EOF > "$TMP_CONF"
+# /etc/nats-server.conf - Scion NATS Server Configuration
 
 port: 4222
 monitor_port: 8222
 
-server_name: scion-demo
+server_name: ${INSTANCE_NAME}
 
 jetstream {
     store_dir: /var/lib/nats/jetstream

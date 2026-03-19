@@ -17,11 +17,10 @@
 
 set -euo pipefail
 
-# Configuration
-REPO="ptone/scion-agent"
-INSTANCE_NAME="scion-demo"
-ZONE=${ZONE:-"us-central1-a"}
-PROJECT_ID=${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/hub-config.sh"
+
+REPO="${GITHUB_REPO}"
 
 if [[ -z "$PROJECT_ID" ]]; then
     echo "Error: PROJECT_ID is not set and could not be determined from gcloud config."
@@ -47,7 +46,7 @@ gcloud compute ssh "${INSTANCE_NAME}" \
     --command "
         sudo -u scion sh -c '
             if [ ! -f /home/scion/.ssh/id_ed25519 ]; then
-                ssh-keygen -t ed25519 -N \"\" -f /home/scion/.ssh/id_ed25519 -C \"scion-demo-deploy-key\"
+                ssh-keygen -t ed25519 -N \"\" -f /home/scion/.ssh/id_ed25519 -C \"scion-'"${HUB_NAME}"'-deploy-key\"
             fi
         '
     "
@@ -66,7 +65,7 @@ trap 'rm -f "$TMP_PUB_KEY"' EXIT
 
 # Add the deploy key (using --allow-write in case it needs to push back, though scion-agent usually doesn't need it on demo)
 # We use a timestamp in the title to avoid collisions if re-run, or we could use a fixed title.
-KEY_TITLE="scion-demo-$(date +%Y%m%d-%H%M%S)"
+KEY_TITLE="scion-${HUB_NAME}-$(date +%Y%m%d-%H%M%S)"
 gh repo deploy-key add "$TMP_PUB_KEY" --repo "$REPO" --title "$KEY_TITLE" || echo "Key already exists or could not be added, continuing..."
 
 echo "=== Cloning Repo on GCE Instance using SSH ==="

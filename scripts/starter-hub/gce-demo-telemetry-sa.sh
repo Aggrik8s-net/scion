@@ -30,8 +30,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/hub-config.sh"
+
 SA_NAME="scion-telemetry-writer"
-PROJECT_ID=${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}
 KEY_DIR=".scratch"
 KEY_FILE="${KEY_DIR}/telemetry-gcp-credentials.json"
 

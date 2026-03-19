@@ -17,13 +17,8 @@
 
 set -euo pipefail
 
-INSTANCE_NAME="scion-demo"
-SERVICE_ACCOUNT_NAME="scion-demo-sa"
-FIREWALL_RULE="scion-demo-allow-http-https"
-REGION=${REGION:-"us-central1"}
-ZONE=${ZONE:-"us-central1-a"}
-PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
-CLOUD_INIT_FILE="scripts/starter-hub/gce-demo-cloud-init.yaml"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/hub-config.sh"
 
 if [[ -z "$PROJECT_ID" ]]; then
     echo "Error: PROJECT_ID is not set and could not be determined from gcloud config."
@@ -57,7 +52,7 @@ function delete_resources() {
     fi
 
     # Optional Cluster deletion
-    if [[ -f "scripts/starter-hub/gce-demo-cluster.sh" ]]; then
+    if [[ "${ENABLE_GKE}" == "true" ]] && [[ -f "scripts/starter-hub/gce-demo-cluster.sh" ]]; then
         ./scripts/starter-hub/gce-demo-cluster.sh delete
     fi
 
@@ -102,14 +97,18 @@ esac
 
 echo "Selected Machine Type: ${MACHINE_TYPE}"
 
-# Prompt for cluster
-if [[ -z "${CREATE_CLUSTER:-}" ]]; then
-    read -p "Create GKE cluster for agents? [y/N]: " CLUSTER_CHOICE
-    if [[ "${CLUSTER_CHOICE,,}" == "y" ]]; then
-        CREATE_CLUSTER="true"
-    else
-        CREATE_CLUSTER="false"
+# Prompt for cluster (only when GKE is enabled)
+if [[ "${ENABLE_GKE}" == "true" ]]; then
+    if [[ -z "${CREATE_CLUSTER:-}" ]]; then
+        read -p "Create GKE cluster for agents? [y/N]: " CLUSTER_CHOICE
+        if [[ "${CLUSTER_CHOICE,,}" == "y" ]]; then
+            CREATE_CLUSTER="true"
+        else
+            CREATE_CLUSTER="false"
+        fi
     fi
+else
+    CREATE_CLUSTER="false"
 fi
 
 # Create Service Account if it doesn't exist
@@ -160,9 +159,11 @@ gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --member "serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
     --role "roles/secretmanager.admin" > /dev/null
-gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-    --member "serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
-    --role "roles/container.admin" > /dev/null
+if [[ "${ENABLE_GKE}" == "true" ]]; then
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member "serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
+        --role "roles/container.admin" > /dev/null
+fi
 
 # Create Firewall Rule if it doesn't exist
 if ! gcloud compute firewall-rules describe "${FIREWALL_RULE}" &>/dev/null; then
@@ -170,7 +171,7 @@ if ! gcloud compute firewall-rules describe "${FIREWALL_RULE}" &>/dev/null; then
     gcloud compute firewall-rules create "${FIREWALL_RULE}" \
         --allow=tcp:80,tcp:443 \
         --target-tags=https-server \
-        --description="Allow HTTP and HTTPS traffic for Scion Demo"
+        --description="Allow HTTP and HTTPS traffic for Scion Hub (${HUB_NAME})"
 else
     echo "Firewall rule ${FIREWALL_RULE} already exists."
 fi
@@ -186,9 +187,9 @@ gcloud compute instances create "${INSTANCE_NAME}" \
     --provisioning-model=STANDARD \
     --service-account="${SERVICE_ACCOUNT_EMAIL}" \
     --scopes=https://www.googleapis.com/auth/cloud-platform \
-    --tags=https-server,scion-demo \
-    --labels=env=demo,project=scion,type=scion-demo \
-    --create-disk=auto-delete=yes,boot=yes,device-name=scion-demo,image=projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts,mode=rw,size=200,type=projects/${PROJECT_ID}/zones/${ZONE}/diskTypes/pd-balanced \
+    --tags=https-server,scion-hub \
+    --labels=env=${HUB_NAME},project=scion,type=scion-hub \
+    --create-disk=auto-delete=yes,boot=yes,device-name=${INSTANCE_NAME},image=projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts,mode=rw,size=200,type=projects/${PROJECT_ID}/zones/${ZONE}/diskTypes/pd-balanced \
     --metadata-from-file=user-data="${CLOUD_INIT_FILE}"
 
 # Cluster creation

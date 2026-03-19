@@ -17,9 +17,8 @@
 
 set -euo pipefail
 
-CLUSTER_NAME="scion-demo-cluster"
-REGION=${REGION:-"us-central1"}
-PROJECT_ID=${PROJECT_ID:-"deploy-demo-test"}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/hub-config.sh"
 
 function delete_resources() {
     echo "=== Deleting Scion Demo Cluster ==="
@@ -55,7 +54,7 @@ if ! gcloud container clusters describe "${CLUSTER_NAME}" --region "${REGION}" -
         --region "${REGION}" \
         --project "${PROJECT_ID}" \
         --release-channel "regular" \
-        --labels=env=demo,project=scion,type=scion-demo-cluster
+        --labels=env=${HUB_NAME},project=scion,type=scion-hub-cluster
 else
     echo "Cluster '${CLUSTER_NAME}' already exists."
 fi

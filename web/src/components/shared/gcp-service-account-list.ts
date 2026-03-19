@@ -158,6 +158,10 @@ export class ScionGCPServiceAccountList extends LitElement {
     }
 
     const projectId = this.dialogProjectId.trim();
+    if (!projectId) {
+      this.dialogError = 'GCP project ID is required';
+      return;
+    }
 
     this.dialogLoading = true;
     this.dialogError = null;
@@ -165,10 +169,10 @@ export class ScionGCPServiceAccountList extends LitElement {
     try {
       const body: Record<string, unknown> = {
         email,
-        project_id: projectId || undefined,
+        projectId,
       };
       if (this.dialogDisplayName.trim()) {
-        body.display_name = this.dialogDisplayName.trim();
+        body.displayName = this.dialogDisplayName.trim();
       }
 
       const response = await apiFetch(`/api/v1/groves/${this.groveId}/gcp-service-accounts`, {
@@ -530,12 +534,12 @@ export class ScionGCPServiceAccountList extends LitElement {
 
           <sl-input
             label="GCP Project ID"
-            placeholder="Optional – extracted from email if omitted"
-            help-text="Leave blank to auto-detect from the service account email"
+            placeholder="e.g. my-project-123"
             value=${this.dialogProjectId}
             @sl-input=${(e: Event) => {
               this.dialogProjectId = (e.target as HTMLInputElement).value;
             }}
+            required
           ></sl-input>
 
           <sl-input
