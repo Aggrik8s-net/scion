@@ -37,7 +37,7 @@ echo "=== DNS and Certificate Setup for ${DOMAIN} ==="
 if ! gcloud dns managed-zones describe "${ZONE_NAME}" &>/dev/null; then
     echo "Creating Cloud DNS managed zone: ${ZONE_NAME}..."
     gcloud dns managed-zones create "${ZONE_NAME}" \
-        --dns-name="${DOMAIN}. " \
+        --dns-name="${DOMAIN}." \
         --description="Managed zone for scion-ai.dev sub-domain" \
         --visibility="public"
 else
