@@ -421,6 +421,163 @@ func (s *Server) handleAgentMessageLogsStream(w http.ResponseWriter, r *http.Req
 	}
 }
 
+// handleGroveMessageLogs handles GET /api/v1/groves/{groveId}/message-logs
+// It queries the "scion-messages" Cloud Logging log for all message entries
+// within the given grove (across all agents).
+func (s *Server) handleGroveMessageLogs(w http.ResponseWriter, r *http.Request, groveID string) {
+	if r.Method != http.MethodGet {
+		MethodNotAllowed(w)
+		return
+	}
+
+	if s.logQueryService == nil {
+		writeError(w, http.StatusNotImplemented, "not_implemented",
+			"Cloud Logging is not configured", nil)
+		return
+	}
+
+	ctx := r.Context()
+
+	grove, err := s.store.GetGrove(ctx, groveID)
+	if err != nil {
+		writeErrorFromErr(w, err, "")
+		return
+	}
+
+	if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil {
+		decision := s.authzService.CheckAccess(ctx, userIdent, groveResource(grove), ActionRead)
+		if !decision.Allowed {
+			writeError(w, http.StatusForbidden, ErrCodeForbidden, "Access denied", nil)
+			return
+		}
+	}
+	if agentIdent := GetAgentIdentityFromContext(ctx); agentIdent != nil {
+		if grove.ID != agentIdent.GroveID() {
+			NotFound(w, "Grove")
+			return
+		}
+	}
+
+	query := r.URL.Query()
+	opts := LogQueryOptions{
+		GroveID: grove.ID,
+		LogID:   logging.MessageLogID,
+	}
+
+	if v := query.Get("tail"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			opts.Tail = n
+		}
+	}
+	if v := query.Get("since"); v != "" {
+		if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
+			opts.Since = t
+		}
+	}
+	if v := query.Get("until"); v != "" {
+		if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
+			opts.Until = t
+		}
+	}
+
+	result, err := s.logQueryService.Query(ctx, opts)
+	if err != nil {
+		slog.Error("grove message log query failed", "grove_id", groveID, "error", err)
+		writeError(w, http.StatusInternalServerError, ErrCodeInternalError,
+			"Failed to query message logs", nil)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// handleGroveMessageLogsStream handles GET /api/v1/groves/{groveId}/message-logs/stream
+// It returns an SSE stream of all message log entries within the grove.
+func (s *Server) handleGroveMessageLogsStream(w http.ResponseWriter, r *http.Request, groveID string) {
+	if r.Method != http.MethodGet {
+		MethodNotAllowed(w)
+		return
+	}
+
+	if s.logQueryService == nil {
+		writeError(w, http.StatusNotImplemented, "not_implemented",
+			"Cloud Logging is not configured", nil)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	ctx := r.Context()
+
+	grove, err := s.store.GetGrove(ctx, groveID)
+	if err != nil {
+		writeErrorFromErr(w, err, "")
+		return
+	}
+
+	if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil {
+		decision := s.authzService.CheckAccess(ctx, userIdent, groveResource(grove), ActionRead)
+		if !decision.Allowed {
+			writeError(w, http.StatusForbidden, ErrCodeForbidden, "Access denied", nil)
+			return
+		}
+	}
+
+	opts := LogQueryOptions{
+		GroveID: grove.ID,
+		LogID:   logging.MessageLogID,
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	flusher.Flush()
+
+	tailCh, tailCancel, err := s.logQueryService.Tail(ctx, opts)
+	if err != nil {
+		slog.Error("failed to open grove message log tail stream", "grove_id", groveID, "error", err)
+		fmt.Fprintf(w, "event: error\ndata: {\"message\":\"failed to open message log stream\"}\n\n")
+		flusher.Flush()
+		return
+	}
+	defer tailCancel()
+
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+
+	timeout := time.NewTimer(10 * time.Minute)
+	defer timeout.Stop()
+
+	for {
+		select {
+		case entry, ok := <-tailCh:
+			if !ok {
+				return
+			}
+			data, err := json.Marshal(entry)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(w, "event: log\ndata: %s\n\n", data)
+			flusher.Flush()
+		case <-heartbeat.C:
+			fmt.Fprintf(w, ":heartbeat %d\n\n", time.Now().UnixMilli())
+			flusher.Flush()
+		case <-timeout.C:
+			fmt.Fprintf(w, "event: timeout\ndata: {\"message\":\"stream timeout, please reconnect\"}\n\n")
+			flusher.Flush()
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
 // resolveGroveAgent resolves an agent by slug or ID within a grove, returning
 // the agent if found and it belongs to the specified grove.
 func (s *Server) resolveGroveAgent(ctx context.Context, groveID, agentID string) (*store.Agent, error) {

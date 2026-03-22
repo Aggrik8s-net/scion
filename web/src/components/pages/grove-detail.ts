@@ -31,6 +31,7 @@ import { stateManager } from '../../client/state.js';
 import type { ViewMode } from '../shared/view-toggle.js';
 import '../shared/status-badge.js';
 import '../shared/view-toggle.js';
+import '../shared/agent-message-viewer.js';
 
 @customElement('scion-page-grove-detail')
 export class ScionPageGroveDetail extends LitElement {
@@ -117,6 +118,12 @@ export class ScionPageGroveDetail extends LitElement {
    */
   @state()
   private viewMode: ViewMode = 'grid';
+
+  /**
+   * Whether the messages section is expanded (lazy-load trigger)
+   */
+  @state()
+  private messagesExpanded = false;
 
   static override styles = css`
     :host {
@@ -1296,7 +1303,41 @@ export class ScionPageGroveDetail extends LitElement {
         ? this.renderEmptyAgents()
         : this.viewMode === 'grid' ? this.renderAgentGrid() : this.renderAgentTable()}
 
+      ${this.grove?.cloudLogging ? this.renderMessagesSection() : nothing}
+
       ${this.shouldShowFilesSection() ? this.renderFilesSection() : ''}
+    `;
+  }
+
+  private handleMessagesToggle(): void {
+    if (!this.messagesExpanded) {
+      this.messagesExpanded = true;
+      this.updateComplete.then(() => {
+        const viewer = this.shadowRoot?.querySelector(
+          'scion-agent-message-viewer'
+        ) as import('../shared/agent-message-viewer.js').ScionAgentMessageViewer | null;
+        viewer?.loadMessages();
+      });
+    }
+  }
+
+  private renderMessagesSection() {
+    return html`
+      <div class="workspace-section">
+        <div class="section-header" style="cursor: pointer;" @click=${this.handleMessagesToggle}>
+          <h2>
+            <sl-icon name=${this.messagesExpanded ? 'chevron-down' : 'chevron-right'}
+              style="font-size: 0.875rem; vertical-align: middle; margin-right: 0.25rem;"></sl-icon>
+            Messages
+          </h2>
+        </div>
+        ${this.messagesExpanded ? html`
+          <scion-agent-message-viewer
+            logsUrl=${`/api/v1/groves/${this.groveId}/message-logs`}
+            streamUrl=${`/api/v1/groves/${this.groveId}/message-logs/stream`}
+          ></scion-agent-message-viewer>
+        ` : nothing}
+      </div>
     `;
   }
 

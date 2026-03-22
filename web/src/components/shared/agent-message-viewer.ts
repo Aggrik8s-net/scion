@@ -72,6 +72,28 @@ export class ScionAgentMessageViewer extends LitElement {
   @property({ type: Boolean })
   canSend = false;
 
+  /**
+   * Custom API URL for fetching message logs.
+   * When set, overrides the default agent-scoped URL.
+   * Query params (tail, since) are appended automatically.
+   */
+  @property()
+  logsUrl = '';
+
+  /**
+   * Custom API URL for the SSE message log stream.
+   * When set, overrides the default agent-scoped URL.
+   */
+  @property()
+  streamUrl = '';
+
+  /**
+   * Label shown for the "self" side of messages when no agentId is set
+   * (e.g. grove-level view). When agentId is present, agentName is used.
+   */
+  @property()
+  contextLabel = '';
+
   @state() private messages: ParsedMessage[] = [];
   @state() private entryMap = new Map<string, ParsedMessage>();
   @state() private loading = false;
@@ -332,8 +354,21 @@ export class ScionAgentMessageViewer extends LitElement {
   // Data fetching
   // ---------------------------------------------------------------------------
 
+  private get resolvedLogsUrl(): string {
+    if (this.logsUrl) return this.logsUrl;
+    if (this.agentId) return `/api/v1/agents/${this.agentId}/message-logs`;
+    return '';
+  }
+
+  private get resolvedStreamUrl(): string {
+    if (this.streamUrl) return this.streamUrl;
+    if (this.agentId) return `/api/v1/agents/${this.agentId}/message-logs/stream`;
+    return '';
+  }
+
   private async fetchMessages(): Promise<void> {
-    if (!this.agentId) return;
+    const baseUrl = this.resolvedLogsUrl;
+    if (!baseUrl) return;
     this.loading = true;
     this.error = null;
 
@@ -342,7 +377,7 @@ export class ScionAgentMessageViewer extends LitElement {
       if (this.messages.length > 0) {
         params.set('since', this.messages[0].timestamp);
       }
-      const url = `/api/v1/agents/${this.agentId}/message-logs?${params.toString()}`;
+      const url = `${baseUrl}?${params.toString()}`;
       const res = await apiFetch(url);
       if (!res.ok) {
         const errData = await res.json().catch(() => ({})) as { error?: { message?: string }; message?: string };
@@ -372,17 +407,23 @@ export class ScionAgentMessageViewer extends LitElement {
     // Determine direction relative to this agent using unique IDs.
     // Check sender_id and recipient_id labels first (UUID-based, unambiguous).
     // Fall back to agent_id label for older log entries.
-    const senderIdLabel = labels['sender_id'] || '';
-    const recipientIdLabel = labels['recipient_id'] || '';
+    // When no agentId is set (grove-level view), always show as 'sent'
+    // (sender → recipient) since there's no "self" agent.
     let direction: 'sent' | 'received';
-    if (senderIdLabel === this.agentId) {
+    if (!this.agentId) {
       direction = 'sent';
-    } else if (recipientIdLabel === this.agentId) {
-      direction = 'received';
     } else {
-      // Fallback for entries logged before sender_id/recipient_id were added
-      const entryAgentId = labels['agent_id'] || '';
-      direction = entryAgentId === this.agentId ? 'received' : 'sent';
+      const senderIdLabel = labels['sender_id'] || '';
+      const recipientIdLabel = labels['recipient_id'] || '';
+      if (senderIdLabel === this.agentId) {
+        direction = 'sent';
+      } else if (recipientIdLabel === this.agentId) {
+        direction = 'received';
+      } else {
+        // Fallback for entries logged before sender_id/recipient_id were added
+        const entryAgentId = labels['agent_id'] || '';
+        direction = entryAgentId === this.agentId ? 'received' : 'sent';
+      }
     }
 
     // Extract message body from the payload.
@@ -433,9 +474,10 @@ export class ScionAgentMessageViewer extends LitElement {
 
   private startStream(): void {
     if (this.eventSource) return;
+    const url = this.resolvedStreamUrl;
+    if (!url) return;
     this.streaming = true;
 
-    const url = `/api/v1/agents/${this.agentId}/message-logs/stream`;
     this.eventSource = new EventSource(url);
 
     this.eventSource.addEventListener('log', (event: Event) => {
@@ -672,11 +714,14 @@ export class ScionAgentMessageViewer extends LitElement {
       const arrowIcon = msg.direction === 'sent' ? 'arrow-right' : 'arrow-left';
       const dirIcon = msg.direction === 'sent' ? 'box-arrow-up-right' : 'box-arrow-in-down-left';
 
-      // Always show the current agent first with direction arrow
-      const agentLabel = this.agentName || this.agentId;
-      const otherParty = msg.direction === 'sent'
-        ? (msg.recipient || 'unknown')
+      // In agent-scoped view, show the current agent first with direction arrow.
+      // In grove-scoped view (no agentId), always show sender → recipient.
+      const fromLabel = this.agentId
+        ? (this.agentName || this.agentId)
         : (msg.sender || 'unknown');
+      const toLabel = this.agentId
+        ? (msg.direction === 'sent' ? (msg.recipient || 'unknown') : (msg.sender || 'unknown'))
+        : (msg.recipient || 'unknown');
 
       rows.push(html`
         <div class="message-row" @click=${() => this.toggleExpand(msg.insertId)}>
@@ -685,9 +730,9 @@ export class ScionAgentMessageViewer extends LitElement {
           </div>
           <div class="msg-content">
             <div class="msg-header">
-              <span class="msg-actor">${agentLabel}</span>
+              <span class="msg-actor">${fromLabel}</span>
               <sl-icon name=${arrowIcon} class="msg-arrow" style="font-size:0.6875rem"></sl-icon>
-              <span class="msg-target">${otherParty}</span>
+              <span class="msg-target">${toLabel}</span>
               <div class="msg-badges">
                 ${msg.msgType ? html`<span class="msg-badge badge-type">${msg.msgType}</span>` : nothing}
                 ${msg.urgent ? html`<span class="msg-badge badge-urgent">urgent</span>` : nothing}

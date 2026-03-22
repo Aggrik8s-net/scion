@@ -3244,6 +3244,16 @@ func (s *Server) handleGroveRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check for nested /message-logs path (grove-level message audit log)
+	if subPath == "message-logs" {
+		s.handleGroveMessageLogs(w, r, groveID)
+		return
+	}
+	if subPath == "message-logs/stream" {
+		s.handleGroveMessageLogsStream(w, r, groveID)
+		return
+	}
+
 	// Check for nested /broadcast path (message broker broadcast)
 	if subPath == "broadcast" {
 		s.handleGroveBroadcast(w, r, groveID)
@@ -3786,7 +3796,7 @@ func (s *Server) getGrove(w http.ResponseWriter, r *http.Request, id string) {
 		}
 	}
 
-	resp := GroveWithCapabilities{Grove: *grove}
+	resp := GroveWithCapabilities{Grove: *grove, CloudLogging: s.logQueryService != nil}
 	if identity := GetIdentityFromContext(ctx); identity != nil {
 		resp.Cap = s.authzService.ComputeCapabilities(ctx, identity, groveResource(grove))
 	}

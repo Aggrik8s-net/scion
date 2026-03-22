@@ -31,7 +31,8 @@ type AgentWithCapabilities struct {
 // GroveWithCapabilities wraps a store.Grove with capability annotations.
 type GroveWithCapabilities struct {
 	store.Grove
-	Cap *Capabilities `json:"_capabilities,omitempty"`
+	Cap          *Capabilities `json:"_capabilities,omitempty"`
+	CloudLogging bool          `json:"cloudLogging,omitempty"`
 }
 
 // TemplateWithCapabilities wraps a store.Template with capability annotations.

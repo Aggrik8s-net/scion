@@ -163,6 +163,7 @@ export interface Grove {
   githubInstallationId?: number | undefined;
   githubPermissions?: GitHubTokenPermissions | undefined;
   githubAppStatus?: GitHubAppGroveStatus | undefined;
+  cloudLogging?: boolean;
 }
 
 /**
