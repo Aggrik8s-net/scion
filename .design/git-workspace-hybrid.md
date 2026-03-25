@@ -34,7 +34,9 @@ Both models have significant limitations for a common use case: **teams that wan
 
 ### 1.2 Proposal
 
-Introduce a **git-workspace hybrid** grove type: a grove that is associated with a git URI (like a git-based grove) but provisions a **single shared git clone** into the hub-native workspace path. Agents mount this shared workspace, just as hub-native groves work today.
+Introduce a **git-workspace hybrid** grove mode: a git grove that provisions a **single shared git clone** into the hub-native workspace path instead of per-agent clones. Agents mount this shared workspace, just as hub-native groves work today.
+
+This is offered as a **sub-mode of git-based groves** — the existing per-agent clone behavior is retained as the default. Users choose the workspace mode when creating a git grove.
 
 This combines the benefits of both models:
 - Git integration (branches, commits, push/pull, PRs)
@@ -44,7 +46,7 @@ This combines the benefits of both models:
 
 ### 1.3 Goals
 
-1. Allow creating a grove from a git URL that provisions a shared, persistent workspace.
+1. Allow creating a git grove that provisions a shared, persistent workspace.
 2. The workspace is a real git clone — agents can commit, branch, push, and pull.
 3. Only one clone operation per grove (not per agent).
 4. Agents share the workspace filesystem, similar to hub-native groves.
@@ -85,7 +87,7 @@ This combines the benefits of both models:
 - More complex lifecycle management (worktree cleanup, branch tracking).
 - Doesn't match the hub-native "shared workspace" mental model that users expect.
 
-**Verdict:** This is a good approach for isolation-first use cases but doesn't fulfill the "shared workspace" goal. It's essentially an optimization of the current git-based model, not a new hybrid. Could be offered as a future option.
+**Verdict:** This is a valid future extension that would leverage the existing local-mode worktree patterns, but it doesn't fulfill the "shared workspace" goal for this scope. It's essentially an optimization of the current git-based model. Marked as a potential future option that could be offered alongside the shared workspace mode.
 
 ### 2.2 Alternative B: Clone Once, Mount Shared (Proposed)
 
@@ -141,11 +143,11 @@ This combines the benefits of both models:
 - Doesn't address any of the pain points listed in Section 1.1.
 - Redundant clones, ephemeral workspaces, no shared state.
 
-**Verdict:** This is the baseline we're improving upon.
+**Verdict:** This remains the default behavior for git groves. It is **not being replaced** — users will choose between this mode and the new shared workspace mode when creating a git grove via the grove creation form (see Section 5.1).
 
 ### 2.5 Decision
 
-**Alternative B (Clone Once, Mount Shared)** is the proposed approach. It provides the best balance of simplicity, git integration, and shared workspace behavior. The isolation trade-offs are acceptable because:
+**Alternative B (Clone Once, Mount Shared)** is the proposed approach, offered as a sub-mode of git groves alongside the existing per-agent clone mode (Alternative D). It provides the best balance of simplicity, git integration, and shared workspace behavior. The isolation trade-offs are acceptable because:
 
 1. Users choosing "shared workspace" mode are explicitly opting into shared state.
 2. The same trade-off already exists for hub-native groves.
@@ -155,20 +157,46 @@ This combines the benefits of both models:
 
 ## 3. Detailed Design
 
-### 3.1 Grove Type Extension
+### 3.1 Grove Type Modeling
 
-The grove creation flow gains a new option that combines git remote association with hub-native workspace behavior. This can be modeled as:
+**Open Question: Third type vs. sub-type of git grove?**
 
-- **Data model:** A grove with both `gitRemote` set AND a flag/label indicating shared-workspace mode.
-- **New label:** `scion.dev/workspace-mode: shared` (vs. the default `per-agent` for standard git groves).
-- **GroveType computation:** The existing computed `GroveType` field (`git`, `linked`, `hub-native`) gains a fourth value: `git-shared`.
+A git URI as a grove identifier is central to the type and model across the system. This makes modeling the hybrid as a **sub-type of git grove** (rather than an entirely new top-level type) the preferred direction.
+
+#### Option 1: Sub-type via label (Recommended)
+
+The hybrid is a git grove with an additional label indicating workspace mode:
+
+- **Data model:** A grove with `gitRemote` set AND `scion.dev/workspace-mode: shared`.
+- **GroveType stays `git`** — no new top-level type. Code that checks `GroveType == "git"` continues to work.
+- **Sub-type differentiation** uses the label where behavior diverges.
 
 ```go
-// In pkg/store/models.go, extend GroveType computation:
+// Check workspace mode where behavior differs:
+func (g *Grove) IsSharedWorkspace() bool {
+    return g.GitRemote != "" && g.Labels["scion.dev/workspace-mode"] == "shared"
+}
+```
+
+**Pros:**
+- Git URI remains the primary type discriminator.
+- Existing code that handles git groves (remote display, credential provisioning, branch UI) works without modification.
+- Fewer places to update — only the divergent paths (clone vs. mount, worktree creation) need to check the sub-type.
+- Cleaner extension path — future sub-modes (e.g., per-agent worktrees from Alternative A) add more label values, not more top-level types.
+
+**Cons:**
+- Risk of code that handles git groves assuming per-agent clone behavior without checking the label.
+- Label-based differentiation is less discoverable than a distinct type value.
+
+#### Option 2: New top-level type (`git-shared`)
+
+Extend `ComputeGroveType()` to return a fourth value:
+
+```go
 func (g *Grove) ComputeGroveType() string {
     if g.GitRemote != "" {
         if g.Labels["scion.dev/workspace-mode"] == "shared" {
-            return "git-shared"   // NEW: git-backed with shared workspace
+            return "git-shared"
         }
         if hasLinkedProvider {
             return "linked"
@@ -179,76 +207,81 @@ func (g *Grove) ComputeGroveType() string {
 }
 ```
 
-### 3.2 Bootstrap: Cloning via Container
+**Pros:**
+- Explicit — every switch/case on grove type handles the new mode or fails visibly.
+- No risk of git-grove code silently applying wrong behavior.
 
-The clone operation uses a **bootstrap container invocation**, reusing the existing `sciontool init` infrastructure. This is similar to how templates are loaded from git URLs — a container is started with git credentials, runs the clone command, and exits.
+**Cons:**
+- Every existing `switch` on GroveType needs updating, even where behavior is identical to `git`.
+- Breaks the principle that a git URI is the primary type signal.
+- Scales poorly — each future sub-mode becomes another top-level type.
+
+**Recommendation:** Option 1 (sub-type via label). The hybrid is fundamentally a git grove with a different workspace strategy, not a different kind of grove. Code paths where behavior diverges are limited (bootstrap, agent provisioning, workspace file management) and can check `IsSharedWorkspace()`.
+
+### 3.2 Bootstrap: Host-Side Cloning
+
+The clone operation is performed **directly by the Hub/broker process** on the host, rather than via a bootstrap container. The Hub already has access to the token infrastructure it uses to provision tokens to containers, and host-side cloning offers significant advantages in speed, simplicity, and error handling.
 
 #### 3.2.1 Bootstrap Flow
 
 ```
-Web UI / CLI                Hub                    Runtime Broker             Bootstrap Container
-   |                         |                          |                        |
-   |-- create grove -------->|                          |                        |
-   |   (gitRemote, mode:     |                          |                        |
-   |    shared)               |                          |                        |
-   |                         |                          |                        |
-   |                         |-- init workspace dir --->|                        |
-   |                         |   (~/.scion/groves/slug) |                        |
-   |                         |                          |                        |
-   |                         |-- start bootstrap ------>|                        |
-   |                         |   container               |-- create container -->|
-   |                         |   (GITHUB_TOKEN,          |   (git clone cmd)     |
-   |                         |    clone URL)             |                       |
-   |                         |                          |                  sciontool run:
-   |                         |<-- status: CLONING ------|<-- event ------------|
-   |                         |                          |                  git clone <url>
-   |                         |                          |                  git config ...
-   |                         |<-- status: READY --------|<-- container exits --|
-   |                         |                          |                        |
-   |<-- grove ready ---------|                          |                        |
+Web UI / CLI                Hub/Broker                 Host Filesystem
+   |                         |                          |
+   |-- create grove -------->|                          |
+   |   (gitRemote, mode:     |                          |
+   |    shared)               |                          |
+   |                         |                          |
+   |                         |-- mkdir grove dir ------>|
+   |                         |   (~/.scion/groves/slug) |
+   |                         |                          |
+   |                         |-- git clone ------------>|
+   |                         |   (using GITHUB_TOKEN    |
+   |                         |    or App credentials)   |
+   |                         |                          |
+   |                         |   [on failure: rm dir,   |
+   |                         |    return creation error] |
+   |                         |                          |
+   |<-- grove ready ---------|                          |
+   |   (or creation error)   |                          |
 ```
 
-#### 3.2.2 Bootstrap Container Specification
+#### 3.2.2 Clone Operation
 
-The bootstrap container is a short-lived container that:
+The Hub/broker performs the clone directly:
 
-1. Mounts the grove workspace directory (`~/.scion/groves/<slug>/`) at `/workspace`.
-2. Receives `GITHUB_TOKEN` (or GitHub App token) as an environment variable.
-3. Runs `git clone` as its primary command via `sciontool`.
-4. Configures git remote with token-based auth.
-5. Exits when clone is complete.
+```go
+// Conceptual host-side clone:
+func cloneSharedWorkspace(grovePath, cloneURL, branch, token string) error {
+    // Build authenticated URL
+    authURL := fmt.Sprintf("https://oauth2:%s@%s/%s.git", token, host, path)
 
-```bash
-# Conceptual container invocation:
-docker run --rm \
-  -v ~/.scion/groves/<slug>:/workspace \
-  -e GITHUB_TOKEN=ghp_xxx \
-  -e SCION_GIT_CLONE_URL=https://github.com/org/repo.git \
-  -e SCION_GIT_BRANCH=main \
-  <base-image> \
-  sciontool clone-workspace
+    // Clone into grove workspace directory
+    cmd := exec.Command("git", "clone", "--branch", branch, authURL, grovePath)
+    if err := cmd.Run(); err != nil {
+        // Cleanup on failure — return to pre-creation state
+        os.RemoveAll(grovePath)
+        return fmt.Errorf("clone failed: %w", err)
+    }
+
+    // Configure git identity
+    gitConfig(grovePath, "user.name", "Scion")
+    gitConfig(grovePath, "user.email", "agent@scion.dev")
+
+    return nil
+}
 ```
 
-The `sciontool clone-workspace` command (new) would:
+#### 3.2.3 Error Handling
 
-```
-1. cd /workspace
-2. git clone --branch=${SCION_GIT_BRANCH:-main} \
-     https://oauth2:${GITHUB_TOKEN}@<host>/<path>.git .
-3. git config user.name "Scion"
-4. git config user.email "agent@scion.dev"
-5. git config credential.helper \
-     '!f() { cat /workspace/.scion/git-credentials; }; f'
-6. Write token to /workspace/.scion/git-credentials (mode 0600)
-7. Exit 0
-```
+If the clone fails (bad URL, expired token, network error):
 
-#### 3.2.3 Why a Container (Not Host-Side Clone)?
+- The workspace directory is cleaned up (removed).
+- The grove creation request fails with a descriptive error.
+- The system returns to the state before grove creation was attempted — no partial grove records.
+- The error response includes actionable guidance (e.g., "Check GITHUB_TOKEN", "Verify repository URL").
+- The user retries by simply re-submitting the grove creation form.
 
-1. **Credential isolation** — the git token never touches the broker's host filesystem outside the workspace mount.
-2. **Consistent environment** — same git version, same tooling, regardless of broker host OS.
-3. **Reuse** — leverages existing container infrastructure (image pulling, volume mounting, secret injection).
-4. **Network access** — containers already have network config for reaching external services.
+This is simpler than maintaining a grove status state machine for provisioning — a failed clone is a failed creation, not a grove in an error state.
 
 ### 3.3 Agent Workspace Mounting
 
@@ -256,7 +289,7 @@ Once the shared workspace is cloned, agents mount it identically to hub-native g
 
 ```go
 // In agent provisioning (pkg/agent/provision.go):
-if grove.GroveType == "git-shared" {
+if grove.IsSharedWorkspace() {
     // Mount the shared workspace — same as hub-native
     workspaceSource = hubNativeGrovePath(grove.Slug)
     // Skip worktree creation — workspace already exists
@@ -272,59 +305,38 @@ The container sees `/workspace` with a full git clone. Agents can:
 
 ### 3.4 Git Credential Management
 
-#### 3.4.1 Initial Token Storage
+#### 3.4.1 Per-Agent Credential Helper
 
-During the bootstrap clone, the token is embedded in the git credential helper configuration within the workspace. This allows subsequent git operations (push, pull, fetch) to authenticate without additional setup.
+Git credentials are configured **per agent in the agent's home directory**, not in the shared workspace. This keeps the workspace clean and mirrors the approach used for agents in standard (clone-based) git groves.
 
-**Storage location:** `<workspace>/.scion/git-credentials`
-
-This file is:
-- Mode `0600` (readable only by the workspace owner)
-- Listed in `.gitignore` (never committed)
-- Accessible to all agents mounting the workspace
-
-#### 3.4.2 Token Expiry and Refresh
-
-**This is a key open question.** GitHub fine-grained PATs have configurable expiry (up to 1 year). When a token expires:
-
-1. **Detection:** Git operations (push/pull) fail with `401 Unauthorized`.
-2. **Current state:** No automatic refresh mechanism exists for PATs.
-
-**Proposed approaches (in order of preference):**
-
-**Option 1: Manual Token Rotation**
-- User sets a new `GITHUB_TOKEN` via `scion hub secret set`.
-- A `scion grove refresh-credentials` command (new) runs a lightweight bootstrap container that updates the credential file in the shared workspace.
-- Simple, explicit, no background processes.
-
-**Option 2: GitHub App Token (Auto-Refresh)**
-- Use GitHub App installation tokens instead of PATs.
-- Installation tokens expire after 1 hour but can be refreshed programmatically.
-- `sciontool` already has a GitHub App token refresh loop (see `init.go:452-507`).
-- When the grove uses a GitHub App, the credential helper calls `sciontool` to get a fresh token.
-- More complex but fully automated.
-
-**Option 3: Credential Helper Proxy**
-- Run a lightweight sidecar or cron job that periodically refreshes the token file.
-- Adds operational complexity.
-
-**Recommendation:** Start with **Option 1** (manual rotation) for simplicity. The token file approach makes rotation straightforward — just overwrite the file. Design the credential helper interface to support **Option 2** in a later phase without breaking changes.
-
-#### 3.4.3 Credential Helper Design
-
-Rather than embedding the token directly in the git remote URL (which exposes it in `git remote -v` output), use a file-based credential helper:
+Each agent's container is provisioned with a credential helper in `$HOME/.gitconfig` (or `$HOME/.config/git/config`):
 
 ```bash
-# In workspace .git/config:
+# In agent home directory (outside workspace):
 [credential]
-    helper = !f() { echo "username=oauth2"; echo "password=$(cat /workspace/.scion/git-credentials)"; }; f
+    helper = !f() { echo "username=oauth2"; echo "password=${GITHUB_TOKEN}"; }; f
 ```
 
 This approach:
-- Keeps the token out of git config and remote URLs.
-- Allows token rotation by updating a single file.
-- Works identically for all agents mounting the workspace.
-- Can be extended to call `sciontool` for GitHub App token refresh.
+- Keeps credentials out of the shared workspace entirely (no `.scion/git-credentials` file).
+- Uses the same pattern as clone-based agents — one credential mechanism for all git grove agents.
+- Each agent receives its token via `GITHUB_TOKEN` environment variable (existing infrastructure).
+- Token rotation is handled at the agent/container level, not the workspace level.
+
+#### 3.4.2 Universal Credential Helper Pattern
+
+The credential helper approach should be standardized across **all** agent types that work with a git remote, whether they clone into an agent-specific workspace or operate on a shared clone:
+
+| Agent Type | Workspace | Credential Location |
+|------------|-----------|-------------------|
+| Clone-based (per-agent) | Agent-specific clone | `$HOME/.gitconfig` in container |
+| Shared workspace (hybrid) | Shared grove clone | `$HOME/.gitconfig` in container |
+
+This ensures a consistent pattern and avoids any credentials leaking into committed files.
+
+#### 3.4.3 Token Refresh
+
+Token refresh conforms with whatever approach is currently used for agents in standard git-based groves. No new token management infrastructure is introduced for the hybrid mode — the same `GITHUB_TOKEN` injection and refresh mechanisms apply.
 
 ### 3.5 Hub-Side Changes
 
@@ -334,10 +346,11 @@ The existing `POST /api/v1/groves` handler needs to:
 
 1. Accept a new `workspaceMode` field (or detect it from labels).
 2. When `workspaceMode: "shared"` and `gitRemote` is set:
-   a. Create the grove record (as today for git groves).
-   b. Create the hub-native workspace directory (`~/.scion/groves/<slug>/`).
-   c. Trigger the bootstrap clone via a broker.
-3. Report grove status during clone: `PROVISIONING` → `READY` (or `ERROR`).
+   a. Create the hub-native workspace directory (`~/.scion/groves/<slug>/`).
+   b. Perform the host-side git clone into the workspace directory.
+   c. On clone success: create the grove record.
+   d. On clone failure: clean up the workspace directory and return an error.
+3. The grove is either `ready` on creation or the creation fails — no intermediate provisioning states.
 
 #### 3.5.2 API Request Extension
 
@@ -349,33 +362,24 @@ The existing `POST /api/v1/groves` handler needs to:
   "gitRemote": "https://github.com/org/repo.git",
   "workspaceMode": "shared",
   "labels": {
-    "scion.dev/default-branch": "main",
-    "scion.dev/clone-url": "https://github.com/org/repo.git"
+    "scion.dev/default-branch": "main"
   }
 }
 ```
 
 #### 3.5.3 Grove Status
 
-Groves gain a status field to track provisioning:
-
-| Status | Meaning |
-|--------|---------|
-| `pending` | Grove record created, workspace not yet provisioned |
-| `provisioning` | Bootstrap clone in progress |
-| `ready` | Workspace cloned and ready for agents |
-| `error` | Bootstrap clone failed (details in grove annotations) |
-
-This status is advisory — it prevents starting agents on a grove whose workspace isn't ready yet.
+Since the clone is synchronous with grove creation, the existing grove status model does not require new provisioning states. A grove either exists (clone succeeded) or creation failed (no grove record). This simplifies both the API and the UI — there is no "provisioning" state to poll for.
 
 ### 3.6 Agent Provisioning Changes
 
-When an agent is started on a `git-shared` grove:
+When an agent is started on a shared-workspace git grove:
 
 1. **Skip git clone** — the workspace already contains a clone.
 2. **Skip worktree creation** — agents share the workspace directly.
 3. **Mount shared workspace** — same bind mount as hub-native groves.
-4. **No branch creation** — agents work on whatever branch is checked out (or coordinate via agent instructions).
+4. **Configure credential helper** — per-agent `$HOME/.gitconfig` with `GITHUB_TOKEN`.
+5. **Branch field behavior** — the agent creation form preserves the branch name field. For shared-workspace groves, the default value is the workspace's current branch (instead of an agent-named branch as used for clone-based agents). Agents can change branches but must coordinate since only one branch can be checked out at a time.
 
 ```go
 // Decision logic in ProvisionAgent():
@@ -384,7 +388,7 @@ case opts.GitClone != nil:
     // Standard git grove: clone inside container
     // (existing behavior)
 
-case groveType == "git-shared":
+case grove.IsSharedWorkspace():
     // Hybrid: mount shared workspace, no clone, no worktree
     workspaceSource = hubNativeGrovePath(grove.Slug)
     shouldCreateWorktree = false
@@ -410,10 +414,10 @@ if grove.GitRemote != "" {
 }
 ```
 
-For `git-shared` groves, this check should be relaxed:
+For shared-workspace groves, this check should be relaxed:
 
 ```go
-if grove.GitRemote != "" && grove.Labels["scion.dev/workspace-mode"] != "shared" {
+if grove.GitRemote != "" && !grove.IsSharedWorkspace() {
     Conflict(w, "Workspace file management is only available for hub-native and git-shared groves")
     return
 }
@@ -432,13 +436,7 @@ With a shared workspace, two agents running concurrently could:
 - Run `git checkout` to different branches
 - Run conflicting git operations (e.g., concurrent commits)
 
-**Potential mitigations:**
-- **Agent instructions:** System prompts can instruct agents to coordinate via shared dirs or messaging.
-- **File-level locking:** A simple lock file mechanism for critical sections.
-- **Branch discipline:** One agent "owns" the branch; others work on files but don't do git operations.
-- **Read-only mounts for secondary agents:** Only one agent mounts read-write; others mount read-only.
-
-**Recommendation:** Start with no formal coordination mechanism. Document the shared workspace semantics clearly and let users decide coordination strategies. This matches how hub-native groves work today.
+**Resolution:** No formal coordination mechanism. This is up to the grove owner and users to manage — the same as hub-native groves today. Document the shared workspace semantics clearly and let users decide coordination strategies via agent instructions.
 
 ### 4.2 Branch Management
 
@@ -446,24 +444,13 @@ With a shared workspace, two agents running concurrently could:
 
 In the current git-based model, each agent gets its own branch (`scion/<agent-name>`). In the shared workspace model, only one branch can be checked out at a time.
 
-**Options:**
-- **Single branch:** All agents work on the same checked-out branch. Simple but limits parallelism.
-- **Git worktree within workspace:** Agents could create worktrees within the shared clone for isolated branches. This is effectively Alternative A (Section 2.1) but initiated by the agent rather than the platform.
-- **Stacked branches:** Agents commit sequentially, each building on the previous agent's work.
-
-**Recommendation:** Default to single-branch mode. Power users can use worktrees within the workspace if needed.
+**Resolution:** The branch name field on the new-agent form is preserved. For shared-workspace groves, the default value is the current workspace branch (e.g., "main") instead of an agent-named branch (which remains the default for clone-based agents). Power users can use git worktrees within the workspace if needed for parallel branch work.
 
 ### 4.3 Multi-Broker Support
 
 **Q: How does this work with multiple brokers?**
 
-The shared workspace lives on a single broker's filesystem. For multi-broker groves:
-
-- **Option 1:** Restrict git-shared groves to a single broker (simplest).
-- **Option 2:** Use GCS sync to replicate the workspace across brokers (complex, potential for divergence).
-- **Option 3:** Each broker clones independently but uses the same remote (effectively per-broker shared workspace).
-
-**Recommendation:** Start with single-broker restriction. Multi-broker can use per-broker clones as a later enhancement.
+**Resolution:** Single broker only. Shared-workspace groves are restricted to a single broker. Multi-broker support requires broader design work and is deferred.
 
 ### 4.4 `.scion` Directory in Cloned Workspace
 
@@ -471,51 +458,21 @@ The shared workspace lives on a single broker's filesystem. For multi-broker gro
 
 The cloned repo might contain its own `.scion/` project configuration. The bootstrap should:
 - Preserve the repo's `.scion/` directory (it's part of the source code).
-- Add `.scion/git-credentials` to `.gitignore` if not already present.
 - Ensure the Hub's grove settings (in the grove DB record) take precedence over any settings in the cloned `.scion/`.
+
+No credential files are stored in the workspace (see Section 3.4), so there is no `.gitignore` management needed for credentials.
 
 ### 4.5 Workspace Size and Cleanup
 
 **Q: How are large cloned workspaces managed?**
 
-Shallow clones (`--depth 1`) reduce initial size but limit git history. Over time, as agents create commits and fetch updates, the workspace may grow.
+**Resolution:** This is a user responsibility. Shallow clones (`--depth 1`) can be offered as an option on the creation form. Workspace growth from commits and fetches is left to users to manage (e.g., `git gc`).
 
-**Options:**
-- Periodic `git gc` (can be run via `sciontool`).
-- `git maintenance` scheduled task.
-- Leave it to users (most repos are manageable).
-
-### 4.6 Token in Workspace `.scion/` Directory
-
-**Q: Is storing the token inside the workspace safe?**
-
-The credential file at `<workspace>/.scion/git-credentials` is:
-- Within the workspace mount, so all agents can access it (intended — they need it for git push).
-- Not committed to git (in `.gitignore`).
-- On the broker's filesystem, accessible to the broker process.
-
-This matches the security model of `GITHUB_TOKEN` as an environment variable (which is also visible to all agents). The file-based approach is slightly more persistent but no less secure.
-
-**Risk:** If an agent commits `.scion/git-credentials` to the repo despite `.gitignore`, the token leaks. Mitigation: the bootstrap should also configure a git pre-commit hook that blocks commits of files matching `*credentials*`.
-
-### 4.7 Handling Clone Failures
-
-**Q: What if the bootstrap clone fails (bad URL, expired token, network error)?**
-
-- Grove status transitions to `error` with a descriptive message.
-- Web UI displays the error with actionable guidance (e.g., "Check GITHUB_TOKEN", "Verify repository URL").
-- User can retry via `scion grove reprovision <slug>` or a web UI button.
-- The workspace directory may be empty or partially cloned — on retry, the bootstrap should clean and re-clone.
-
-### 4.8 Pulling Updates from Remote
+### 4.6 Pulling Updates from Remote
 
 **Q: How do agents get upstream changes?**
 
-Agents can run `git pull` manually. For automated refresh:
-- A `scion grove pull <slug>` command could exec into the shared workspace and run `git pull`.
-- A scheduled task could periodically pull (but risks conflicts with in-progress agent work).
-
-**Recommendation:** Manual pull initially. Automated pull is a future enhancement that requires conflict resolution design.
+**Resolution:** Manual pull. Agents run `git pull` themselves. Automated pull is a future enhancement that requires conflict resolution design.
 
 ---
 
@@ -523,40 +480,54 @@ Agents can run `git pull` manually. For automated refresh:
 
 ### 5.1 Grove Creation Form
 
-The existing `grove-create.ts` component has a `GroveMode` type with two options: `'git' | 'hub'`. This extends to three:
+The grove creation flow uses a two-step type selection:
+
+1. **Primary type choice:** `Hub Workspace` or `Git Repository`
+2. **Git mode choice (shown when Git Repository is selected):**
+   - `Per-agent clone` (default) — each agent gets its own clone (existing behavior).
+   - `Shared workspace` — a single shared clone mounted by all agents (new).
 
 ```typescript
-type GroveMode = 'git' | 'hub' | 'git-shared';
-```
+// Primary type
+type GroveType = 'hub' | 'git';
 
-The form gains a third option in the "Workspace Type" selector:
+// Git sub-mode (only relevant when GroveType is 'git')
+type GitWorkspaceMode = 'per-agent' | 'shared';
+```
 
 ```html
+<!-- Primary type selector -->
 <sl-option value="hub">Hub Workspace</sl-option>
-<sl-option value="git">Git Repository (per-agent clone)</sl-option>
-<sl-option value="git-shared">Git Repository (shared workspace)</sl-option>
+<sl-option value="git">Git Repository</sl-option>
+
+<!-- Sub-mode selector (visible when git is selected) -->
+<sl-radio-group label="Workspace Mode">
+  <sl-radio value="per-agent">Per-agent clone (each agent gets its own copy)</sl-radio>
+  <sl-radio value="shared">Shared workspace (single clone, all agents share)</sl-radio>
+</sl-radio-group>
 ```
 
-When `git-shared` is selected:
-- Show the Git Remote URL field (same as `git` mode).
+When `shared` is selected:
+- Show the Git Remote URL field (same as per-agent mode).
 - Show the Default Branch field.
 - Add a note: "A single git clone will be created and shared by all agents."
 
 ### 5.2 Grove Detail Page
 
-For `git-shared` groves, the grove detail page should show:
+For shared-workspace git groves, the grove detail page should show:
 - Git remote URL (linked to GitHub).
 - Current branch checked out.
-- Workspace provisioning status.
 - File browser (reuse hub-native workspace file listing).
-- A "Re-clone" or "Pull Latest" action button.
+- A "Pull Latest" action button.
 
-### 5.3 Grove Status Display
+### 5.3 Agent Creation Form
 
-Add provisioning status to the grove cards and detail views:
-- `provisioning` → spinner with "Cloning repository..."
-- `ready` → green checkmark
-- `error` → red error badge with details
+The branch name field on the new-agent form adapts its default based on workspace mode:
+
+| Git Workspace Mode | Default Branch Value |
+|-------------------|---------------------|
+| Per-agent clone | `scion/<agent-name>` (existing behavior) |
+| Shared workspace | Current workspace branch (e.g., `main`) |
 
 ---
 
@@ -565,46 +536,42 @@ Add provisioning status to the grove cards and detail views:
 ### Phase 1: Data Model & API (Foundation)
 
 1. Add `workspaceMode` field to `CreateGroveRequest` and grove labels.
-2. Add grove `Status` field to the store model (`pending`, `provisioning`, `ready`, `error`).
-3. Update `ComputeGroveType()` to return `git-shared` for hybrid groves.
-4. Update `handleGroveWorkspace` to allow file operations on `git-shared` groves.
-5. Update `POST /api/v1/groves` handler to accept and store hybrid grove configuration.
+2. Add `IsSharedWorkspace()` helper to grove model.
+3. Update `handleGroveWorkspace` to allow file operations on shared-workspace groves.
+4. Update `POST /api/v1/groves` handler to accept and store hybrid grove configuration.
 
-### Phase 2: Bootstrap Clone Infrastructure
+### Phase 2: Host-Side Clone Infrastructure
 
-1. Add `sciontool clone-workspace` command (or extend `sciontool init` with a clone-only mode).
-2. Implement bootstrap container invocation on the broker:
-   - Start a short-lived container with workspace mount and git credentials.
-   - Execute clone command.
-   - Report status back to Hub.
-3. Implement credential file setup (`.scion/git-credentials`, credential helper config).
-4. Add `.gitignore` management for credential files.
+1. Implement host-side git clone in the grove creation handler:
+   - Create workspace directory.
+   - Run `git clone` with token auth.
+   - Configure git identity.
+   - On failure: clean up directory, fail creation.
+2. Ensure git is available on Hub/broker hosts (document as prerequisite).
 
 ### Phase 3: Agent Provisioning Integration
 
-1. Update `ProvisionAgent()` to detect `git-shared` groves and skip worktree/clone.
-2. Mount shared workspace path for agents on `git-shared` groves.
-3. Ensure agent environment includes `GITHUB_TOKEN` for push operations.
-4. Test concurrent agent access to shared workspace.
+1. Update `ProvisionAgent()` to detect shared-workspace groves and skip worktree/clone.
+2. Mount shared workspace path for agents on shared-workspace groves.
+3. Configure per-agent credential helper in `$HOME/.gitconfig` with `GITHUB_TOKEN`.
+4. Update default branch name logic for new-agent form.
+5. Test concurrent agent access to shared workspace.
 
 ### Phase 4: Web UI
 
-1. Add `git-shared` option to `grove-create.ts` form.
-2. Add grove provisioning status display.
-3. Enable workspace file browser for `git-shared` groves.
-4. Add "Pull Latest" / "Re-clone" actions to grove detail page.
+1. Add git workspace mode sub-selector to grove creation form.
+2. Enable workspace file browser for shared-workspace groves.
+3. Add "Pull Latest" action to grove detail page.
+4. Adapt agent creation form branch default based on workspace mode.
 
-### Phase 5: Credential Refresh & Polish
+### Phase 5: Credential Standardization & Polish
 
-1. Implement `scion grove refresh-credentials` command.
-2. Add grove status API endpoints for monitoring provisioning.
-3. Add retry mechanism for failed bootstrap clones.
-4. Error handling and user guidance for common failure modes.
-5. Documentation and template updates.
+1. Standardize credential helper pattern across all git grove agent types (per-agent `$HOME`-based).
+2. Error handling and user guidance for common failure modes.
+3. Documentation and template updates.
 
 ### Future Phases (Deferred)
 
-- **GitHub App token auto-refresh** — integrate with existing `sciontool` token refresh loop.
 - **Per-agent worktrees within shared clone** — Alternative A as an opt-in sub-mode.
 - **Multi-broker workspace sync** — GCS-based replication of the shared workspace.
 - **Automated upstream pull** — scheduled `git pull` with conflict detection.
@@ -617,13 +584,17 @@ Add provisioning status to the grove cards and detail views:
 | # | Question | Status | Decision |
 |---|----------|--------|----------|
 | 1 | **Workspace model?** | Resolved | Shared workspace (Alternative B). Simplest model, matches hub-native mental model. |
-| 2 | **Clone mechanism?** | Resolved | Bootstrap container via `sciontool`. Reuses existing container infrastructure. |
-| 3 | **Credential storage?** | Proposed | File-based credential helper in `<workspace>/.scion/git-credentials`. |
-| 4 | **Token refresh?** | Open | Start with manual rotation; GitHub App auto-refresh as Phase 2. |
-| 5 | **Agent coordination?** | Open | No formal mechanism initially. Document shared semantics. |
-| 6 | **Multi-broker?** | Deferred | Single broker only. Multi-broker requires broader design. |
-| 7 | **Branch management?** | Open | Single checked-out branch. Per-agent worktrees as future option. |
-| 8 | **Grove status model?** | Proposed | New `Status` field: `pending` → `provisioning` → `ready` / `error`. |
+| 2 | **Retain per-agent clone?** | Resolved | Yes. Per-agent clone remains the default. Shared workspace is a sub-mode choice. |
+| 3 | **Type modeling?** | Open | Prefer sub-type of git grove (via label) over new top-level type. See Section 3.1 for pros/cons. |
+| 4 | **Clone mechanism?** | Resolved | Host-side clone by Hub/broker. Simpler, faster, better error handling than bootstrap container. |
+| 5 | **Credential storage?** | Resolved | Per-agent `$HOME/.gitconfig` credential helper using `GITHUB_TOKEN`. No credentials in workspace. Same pattern as clone-based agents. |
+| 6 | **Token refresh?** | Resolved | Conforms with existing git grove agent token management. No new infrastructure. |
+| 7 | **Agent coordination?** | Resolved | No formal mechanism. Up to grove owner and users to manage. |
+| 8 | **Multi-broker?** | Deferred | Single broker only. |
+| 9 | **Branch management?** | Resolved | Branch field preserved. Default is workspace branch for shared mode, agent-named for clone mode. |
+| 10 | **Clone failure handling?** | Resolved | Clone failure = creation failure. Clean up, return to pre-creation state. |
+| 11 | **Workspace size?** | Resolved | User responsibility. |
+| 12 | **Upstream pull?** | Resolved | Manual only. |
 
 ---
 
@@ -633,7 +604,7 @@ Add provisioning status to the grove cards and detail views:
 
 | Document | Relevance |
 |----------|-----------|
-| `hosted/git-groves.md` | Current git-based grove design (per-agent clone). This proposal extends it. |
+| `hosted/git-groves.md` | Current git-based grove design (per-agent clone). This proposal extends it with a sub-mode. |
 | `hosted/sync-design.md` | GCS workspace sync. Non-git bootstrap in Section 13. Informs Alternative C. |
 | `hosted/git-ws.md` | Research on current git workspace state. Section 4 gaps are partially addressed here. |
 | `hosted/hosted-architecture.md` | Overall hosted architecture. Grove identity model. |
