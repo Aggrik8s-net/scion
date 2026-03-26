@@ -393,6 +393,10 @@ func (s *LocalPTYSession) runK8sExec() error {
 				if err := json.Unmarshal(data, &msg); err != nil {
 					continue
 				}
+				// Log escape sequences for debugging extended key support (CSI u, etc.)
+				if len(msg.Data) > 0 && msg.Data[0] == 0x1b {
+					slog.Debug("PTY k8s-ws→stdin escape seq", "agent_id", s.agentID, "hex", fmt.Sprintf("%x", msg.Data), "len", len(msg.Data))
+				}
 				if _, writeErr := stdinWriter.Write(msg.Data); writeErr != nil {
 					errCh <- writeErr
 					return
@@ -494,6 +498,10 @@ func (s *LocalPTYSession) readFromWebSocket() error {
 			var msg wsprotocol.PTYDataMessage
 			if err := json.Unmarshal(data, &msg); err != nil {
 				continue
+			}
+			// Log escape sequences for debugging extended key support (CSI u, etc.)
+			if len(msg.Data) > 0 && msg.Data[0] == 0x1b {
+				slog.Debug("PTY ws→pty escape seq", "agent_id", s.agentID, "hex", fmt.Sprintf("%x", msg.Data), "len", len(msg.Data))
 			}
 			if _, err := s.ptyMaster.Write(msg.Data); err != nil {
 				return err
@@ -714,6 +722,10 @@ func (h *StreamPTYHandler) runK8sExec() error {
 				errCh <- io.EOF
 				return
 			case data := <-h.handler.dataCh:
+				// Log escape sequences for debugging extended key support (CSI u, etc.)
+				if len(data) > 0 && data[0] == 0x1b {
+					slog.Debug("PTY k8s-stream→stdin escape seq", "slug", h.slug, "hex", fmt.Sprintf("%x", data), "len", len(data))
+				}
 				if _, writeErr := stdinWriter.Write(data); writeErr != nil {
 					errCh <- writeErr
 					return
@@ -850,6 +862,10 @@ func (h *StreamPTYHandler) readFromStream() error {
 		case <-h.handler.closeCh:
 			return io.EOF
 		case data := <-h.handler.dataCh:
+			// Log escape sequences for debugging extended key support (CSI u, etc.)
+			if len(data) > 0 && data[0] == 0x1b {
+				slog.Debug("PTY stream→pty escape seq", "slug", h.slug, "hex", fmt.Sprintf("%x", data), "len", len(data))
+			}
 			if _, err := h.ptyMaster.Write(data); err != nil {
 				return err
 			}

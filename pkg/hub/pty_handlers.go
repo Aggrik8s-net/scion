@@ -271,6 +271,10 @@ func (s *PTYSession) readFromClient() error {
 			if err := json.Unmarshal(data, &msg); err != nil {
 				continue
 			}
+			// Log escape sequences for debugging extended key support (CSI u, etc.)
+			if len(msg.Data) > 0 && msg.Data[0] == 0x1b {
+				slog.Debug("PTY client→broker escape seq", "agent_id", s.agentID, "hex", fmt.Sprintf("%x", msg.Data), "len", len(msg.Data))
+			}
 			// Forward data to broker via stream
 			if err := s.controlChan.SendStreamData(s.brokerID, s.stream.streamID, msg.Data); err != nil {
 				return err

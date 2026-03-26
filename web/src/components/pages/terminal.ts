@@ -468,6 +468,7 @@ export class ScionPageTerminal extends LitElement {
       // inner applications (e.g. claude-code) can distinguish it from plain
       // Enter.  Without this, xterm.js sends \r for both.
       if (event.type === 'keydown' && event.key === 'Enter' && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        console.debug('[Terminal] Shift+Enter detected, sending CSI u: ESC[13;2u');
         this.sendData('\x1b[13;2u');
         return false;
       }
@@ -594,6 +595,12 @@ export class ScionPageTerminal extends LitElement {
     // Encode to base64 — handle Unicode properly
     const bytes = new TextEncoder().encode(data);
     const base64 = btoa(String.fromCharCode(...bytes));
+
+    // Log escape sequences for debugging extended key support
+    if (data.includes('\x1b')) {
+      const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+      console.debug(`[Terminal] sendData escape seq: hex=[${hex}] len=${bytes.length}`);
+    }
 
     const msg: PTYDataMessage = { type: 'data', data: base64 };
     this.socket.send(JSON.stringify(msg));
