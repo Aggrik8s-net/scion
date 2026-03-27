@@ -457,6 +457,7 @@ export class ScionPageTerminal extends LitElement {
     this.shadowRoot?.appendChild(xtermStyle);
 
     this.terminal.open(container);
+    this.enableShiftSelectionOnMac();
 
     // Defer initial fit until browser has completed layout so the container
     // has its final dimensions (below the toolbar).
@@ -541,6 +542,27 @@ export class ScionPageTerminal extends LitElement {
       }
     });
     this.resizeObserver.observe(container);
+  }
+
+  /**
+   * xterm.js only treats Option as the force-selection modifier on macOS.
+   * Patch the instantiated selection service so Shift-drag also bypasses
+   * tmux mouse reporting and starts terminal selection.
+   */
+  private enableShiftSelectionOnMac(): void {
+    if (typeof navigator === 'undefined') return;
+    const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+    if (!isMac || !this.terminal) return;
+
+    const selectionService = (this.terminal as Terminal & {
+      _core?: { _selectionService?: { shouldForceSelection?: (event: MouseEvent) => boolean } };
+    })._core?._selectionService;
+    if (!selectionService?.shouldForceSelection) return;
+
+    const originalShouldForceSelection = selectionService.shouldForceSelection.bind(selectionService);
+    selectionService.shouldForceSelection = (event: MouseEvent): boolean => {
+      return event.shiftKey || originalShouldForceSelection(event);
+    };
   }
 
   private connectWebSocket(): void {
@@ -761,7 +783,7 @@ export class ScionPageTerminal extends LitElement {
         <span class="agent-name">${this.agentName || this.agentId}</span>
         <div
           class="toggle-group"
-          title="Tmux mouse mode stays enabled for scrolling and pane interactions. Hold Shift while dragging to select text on Linux/Windows, or Option on macOS. Use Mouse Off only if you want plain drag selection without a modifier."
+          title="Tmux mouse mode stays enabled for scrolling and pane interactions. Hold Shift while dragging to select text. On macOS, Option-drag also works. Use Mouse Off only if you want plain drag selection without a modifier."
         >
           <button
             class=${this.mouseEnabled ? 'active' : ''}
@@ -771,7 +793,7 @@ export class ScionPageTerminal extends LitElement {
           >${this.renderMouseIcon()}</button>
           <button
             class=${!this.mouseEnabled ? 'active' : ''}
-            title="Mouse off: fallback for plain browser drag selection without Shift/Option"
+            title="Mouse off: fallback for plain browser drag selection without Shift"
             @click=${() => this.setMouseMode(false)}
             ?disabled=${!this.connected}
           >${this.renderClipboardIcon()}</button>
