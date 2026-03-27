@@ -478,12 +478,12 @@ export class ScionPageTerminal extends LitElement {
         });
       }
 
-      // Shift+Enter: send CSI u sequence (ESC [ 13 ; 2 u) so that tmux and
-      // inner applications (e.g. claude-code) can distinguish it from plain
-      // Enter.  Without this, xterm.js sends \r for both.
+      // Shift+Enter: send ESC CR (\x1b\r) so that inner applications
+      // (e.g. claude-code) can distinguish it from plain Enter.
+      // This matches what native terminals send for Alt+Enter / Alt+Shift+Enter.
       if (event.type === 'keydown' && event.key === 'Enter' && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
-        console.debug('[Terminal] Shift+Enter detected, sending CSI u: ESC[13;2u');
-        this.sendData('\x1b[13;2u');
+        console.debug('[Terminal] Shift+Enter detected, sending ESC CR');
+        this.sendData('\x1b\r');
         return false;
       }
 
