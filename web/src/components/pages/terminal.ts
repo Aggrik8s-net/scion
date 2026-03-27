@@ -464,20 +464,6 @@ export class ScionPageTerminal extends LitElement {
     // needs explicit handling for these since it doesn't natively emit CSI u
     // sequences for modified keys.
     this.terminal.attachCustomKeyEventHandler((event: KeyboardEvent) => {
-      // Debug: log all Enter-related events to diagnose Shift+Enter handling
-      if (event.key === 'Enter' || event.keyCode === 13) {
-        console.debug('[Terminal] Enter event:', {
-          type: event.type,
-          key: event.key,
-          code: event.code,
-          keyCode: event.keyCode,
-          shiftKey: event.shiftKey,
-          ctrlKey: event.ctrlKey,
-          altKey: event.altKey,
-          metaKey: event.metaKey,
-        });
-      }
-
       // Shift+Enter: send ESC CR (\x1b\r) so that inner applications
       // (e.g. claude-code) can distinguish it from plain Enter.
       // This matches what native terminals send for Alt+Enter / Alt+Shift+Enter.
@@ -613,12 +599,6 @@ export class ScionPageTerminal extends LitElement {
     // Encode to base64 — handle Unicode properly
     const bytes = new TextEncoder().encode(data);
     const base64 = btoa(String.fromCharCode(...bytes));
-
-    // Log escape sequences for debugging extended key support
-    if (data.includes('\x1b')) {
-      const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
-      console.debug(`[Terminal] sendData escape seq: hex=[${hex}] len=${bytes.length}`);
-    }
 
     const msg: PTYDataMessage = { type: 'data', data: base64 };
     this.socket.send(JSON.stringify(msg));
