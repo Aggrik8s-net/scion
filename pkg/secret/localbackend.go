@@ -25,11 +25,17 @@ import (
 // Values are stored directly in the Hub database.
 type LocalBackend struct {
 	store store.SecretStore
+	hubID string
 }
 
 // NewLocalBackend creates a LocalBackend wrapping the given SecretStore.
-func NewLocalBackend(s store.SecretStore) *LocalBackend {
-	return &LocalBackend{store: s}
+func NewLocalBackend(s store.SecretStore, hubID string) *LocalBackend {
+	return &LocalBackend{store: s, hubID: hubID}
+}
+
+// HubID returns the hub instance ID used for hub-scoped secret namespacing.
+func (b *LocalBackend) HubID() string {
+	return b.hubID
 }
 
 func (b *LocalBackend) Get(ctx context.Context, name, scope, scopeID string) (*SecretWithValue, error) {
@@ -88,7 +94,7 @@ func (b *LocalBackend) Resolve(ctx context.Context, userID, groveID, brokerID st
 
 	var scopes []scopeEntry
 	// Hub scope is always included as lowest precedence
-	scopes = append(scopes, scopeEntry{scope: store.ScopeHub, scopeID: store.ScopeIDHub})
+	scopes = append(scopes, scopeEntry{scope: store.ScopeHub, scopeID: b.hubID})
 	if userID != "" {
 		scopes = append(scopes, scopeEntry{scope: store.ScopeUser, scopeID: userID})
 	}

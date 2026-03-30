@@ -84,7 +84,7 @@ func TestResolveSecrets(t *testing.T) {
 	}
 
 	// Create dispatcher with local backend (reads work, writes are blocked)
-	backend := secret.NewLocalBackend(memStore)
+	backend := secret.NewLocalBackend(memStore, "test-hub-id")
 	mockClient := &mockRuntimeBrokerClient{}
 	dispatcher := NewHTTPAgentDispatcherWithClient(memStore, mockClient, false, slog.Default())
 	dispatcher.SetSecretBackend(backend)
@@ -198,7 +198,7 @@ func TestResolveSecrets_WithBackend(t *testing.T) {
 	}
 
 	// Create dispatcher with local backend
-	backend := secret.NewLocalBackend(memStore)
+	backend := secret.NewLocalBackend(memStore, "test-hub-id")
 	mockClient := &mockRuntimeBrokerClient{}
 	dispatcher := NewHTTPAgentDispatcherWithClient(memStore, mockClient, false, slog.Default())
 	dispatcher.SetSecretBackend(backend)
@@ -250,7 +250,7 @@ func TestResolveSecrets_NoOwner(t *testing.T) {
 	memStore := createTestStore(t)
 	ctx := context.Background()
 
-	backend := secret.NewLocalBackend(memStore)
+	backend := secret.NewLocalBackend(memStore, "test-hub-id")
 	mockClient := &mockRuntimeBrokerClient{}
 	dispatcher := NewHTTPAgentDispatcherWithClient(memStore, mockClient, false, slog.Default())
 	dispatcher.SetSecretBackend(backend)
@@ -282,7 +282,7 @@ func TestResolveSecrets_HubScope(t *testing.T) {
 		SecretType:     store.SecretTypeEnvironment,
 		Target:         "ORG_API_KEY",
 		Scope:          store.ScopeHub,
-		ScopeID:        store.ScopeIDHub,
+		ScopeID:        "test-hub-id",
 	}
 	// Create a hub secret that will be overridden by user scope
 	hubOverridden := &store.Secret{
@@ -292,7 +292,7 @@ func TestResolveSecrets_HubScope(t *testing.T) {
 		SecretType:     store.SecretTypeEnvironment,
 		Target:         "API_KEY",
 		Scope:          store.ScopeHub,
-		ScopeID:        store.ScopeIDHub,
+		ScopeID:        "test-hub-id",
 	}
 	// Create user secret that overrides hub
 	userSecret := &store.Secret{
@@ -312,7 +312,7 @@ func TestResolveSecrets_HubScope(t *testing.T) {
 		SecretType:     store.SecretTypeEnvironment,
 		Target:         "DB_PASS",
 		Scope:          store.ScopeHub,
-		ScopeID:        store.ScopeIDHub,
+		ScopeID:        "test-hub-id",
 	}
 	groveSecret := &store.Secret{
 		ID:             "sg1",
@@ -330,7 +330,7 @@ func TestResolveSecrets_HubScope(t *testing.T) {
 		}
 	}
 
-	backend := secret.NewLocalBackend(memStore)
+	backend := secret.NewLocalBackend(memStore, "test-hub-id")
 	mockClient := &mockRuntimeBrokerClient{}
 	dispatcher := NewHTTPAgentDispatcherWithClient(memStore, mockClient, false, slog.Default())
 	dispatcher.SetSecretBackend(backend)

@@ -86,12 +86,12 @@ func (s *Server) handleGetGitHubApp(w http.ResponseWriter, r *http.Request) {
 	if !hasPrivateKey || !hasWebhookSecret {
 		if s.secretBackend != nil {
 			if !hasPrivateKey {
-				if meta, err := s.secretBackend.GetMeta(r.Context(), GitHubAppSecretPrivateKey, store.ScopeHub, store.ScopeIDHub); err == nil && meta != nil {
+				if meta, err := s.secretBackend.GetMeta(r.Context(), GitHubAppSecretPrivateKey, store.ScopeHub, s.hubID); err == nil && meta != nil {
 					hasPrivateKey = true
 				}
 			}
 			if !hasWebhookSecret {
-				if meta, err := s.secretBackend.GetMeta(r.Context(), GitHubAppSecretWebhookSecret, store.ScopeHub, store.ScopeIDHub); err == nil && meta != nil {
+				if meta, err := s.secretBackend.GetMeta(r.Context(), GitHubAppSecretWebhookSecret, store.ScopeHub, s.hubID); err == nil && meta != nil {
 					hasWebhookSecret = true
 				}
 			}
@@ -172,12 +172,12 @@ func (s *Server) handleUpdateGitHubApp(w http.ResponseWriter, r *http.Request) {
 	hasWebhookSecret := cfg.WebhookSecret != ""
 	// Check secrets backend too
 	if !hasPrivateKey && s.secretBackend != nil {
-		if meta, err := s.secretBackend.GetMeta(ctx, GitHubAppSecretPrivateKey, store.ScopeHub, store.ScopeIDHub); err == nil && meta != nil {
+		if meta, err := s.secretBackend.GetMeta(ctx, GitHubAppSecretPrivateKey, store.ScopeHub, s.hubID); err == nil && meta != nil {
 			hasPrivateKey = true
 		}
 	}
 	if !hasWebhookSecret && s.secretBackend != nil {
-		if meta, err := s.secretBackend.GetMeta(ctx, GitHubAppSecretWebhookSecret, store.ScopeHub, store.ScopeIDHub); err == nil && meta != nil {
+		if meta, err := s.secretBackend.GetMeta(ctx, GitHubAppSecretWebhookSecret, store.ScopeHub, s.hubID); err == nil && meta != nil {
 			hasWebhookSecret = true
 		}
 	}
@@ -204,7 +204,7 @@ func (s *Server) setGitHubAppSecret(ctx context.Context, name, value, descriptio
 			Value:         value,
 			SecretType:    secret.TypeVariable,
 			Scope:         store.ScopeHub,
-			ScopeID:       store.ScopeIDHub,
+			ScopeID:       s.hubID,
 			Description:   description,
 			InjectionMode: "as_needed",
 			CreatedBy:     userID,
@@ -219,7 +219,7 @@ func (s *Server) setGitHubAppSecret(ctx context.Context, name, value, descriptio
 		Key:            name,
 		EncryptedValue: value,
 		Scope:          store.ScopeHub,
-		ScopeID:        store.ScopeIDHub,
+		ScopeID:        s.hubID,
 		SecretType:     store.SecretTypeVariable,
 		Description:    description,
 		Version:        1,
@@ -234,7 +234,7 @@ func (s *Server) setGitHubAppSecret(ctx context.Context, name, value, descriptio
 // falling back to direct store lookup.
 func (s *Server) loadGitHubAppSecret(ctx context.Context, name string) (string, error) {
 	if s.secretBackend != nil {
-		sv, err := s.secretBackend.Get(ctx, name, store.ScopeHub, store.ScopeIDHub)
+		sv, err := s.secretBackend.Get(ctx, name, store.ScopeHub, s.hubID)
 		if err != nil {
 			return "", err
 		}
@@ -242,7 +242,7 @@ func (s *Server) loadGitHubAppSecret(ctx context.Context, name string) (string, 
 	}
 
 	// Fallback: read directly from the database
-	return s.store.GetSecretValue(ctx, name, store.ScopeHub, store.ScopeIDHub)
+	return s.store.GetSecretValue(ctx, name, store.ScopeHub, s.hubID)
 }
 
 // persistGitHubAppConfig writes the non-sensitive GitHub App configuration

@@ -122,6 +122,7 @@ type HTTPAgentDispatcher struct {
 	secretBackend   secret.SecretBackend
 	githubAppMinter GitHubAppTokenMinter // Optional GitHub App token minter
 	hubEndpoint     string               // Hub endpoint URL for agents to call back
+	hubID           string               // Hub instance ID for hub-scoped queries
 	devAuthToken    string               // Dev auth token to inject into agent env (dev-auth mode only)
 	debug           bool
 	log             *slog.Logger
@@ -160,6 +161,11 @@ func (d *HTTPAgentDispatcher) SetHubEndpoint(endpoint string) {
 // SetSecretBackend sets the secret backend for resolving secrets.
 func (d *HTTPAgentDispatcher) SetSecretBackend(b secret.SecretBackend) {
 	d.secretBackend = b
+}
+
+// SetHubID sets the hub instance ID for hub-scoped queries.
+func (d *HTTPAgentDispatcher) SetHubID(id string) {
+	d.hubID = id
 }
 
 // SetDevAuthToken sets the dev auth token to inject into agent containers.
@@ -700,7 +706,7 @@ func (d *HTTPAgentDispatcher) resolveEnvFromStorage(ctx context.Context, agent *
 	result := make(map[string]string)
 
 	// Query hub-scoped env vars (lowest precedence)
-	vars, err := d.store.ListEnvVars(ctx, store.EnvVarFilter{Scope: store.ScopeHub, ScopeID: store.ScopeIDHub})
+	vars, err := d.store.ListEnvVars(ctx, store.EnvVarFilter{Scope: store.ScopeHub, ScopeID: d.hubID})
 	if err != nil {
 		if d.debug {
 			d.log.Warn("Failed to list hub env vars", "error", err)
@@ -795,7 +801,7 @@ func (d *HTTPAgentDispatcher) buildEnvSources(ctx context.Context, agent *store.
 	sources := make(map[string]string)
 
 	// Check hub scope (lowest precedence — later scopes override)
-	vars, err := d.store.ListEnvVars(ctx, store.EnvVarFilter{Scope: store.ScopeHub, ScopeID: store.ScopeIDHub})
+	vars, err := d.store.ListEnvVars(ctx, store.EnvVarFilter{Scope: store.ScopeHub, ScopeID: d.hubID})
 	if err == nil {
 		for _, v := range vars {
 			if _, inResolved := resolvedEnv[v.Key]; inResolved {

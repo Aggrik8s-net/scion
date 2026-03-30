@@ -1249,7 +1249,7 @@ func TestDeleteGrove_CascadesEnvVarsSecretsHarnessConfigs(t *testing.T) {
 	hubEnvVarID := api.NewUUID()
 	require.NoError(t, s.CreateEnvVar(ctx, &store.EnvVar{
 		ID: hubEnvVarID, Key: "GLOBAL_VAR", Value: "keep-me",
-		Scope: store.ScopeHub, ScopeID: store.ScopeIDHub,
+		Scope: store.ScopeHub, ScopeID: "test-hub-id",
 	}))
 
 	// Verify resources exist before deletion
@@ -1286,7 +1286,7 @@ func TestDeleteGrove_CascadesEnvVarsSecretsHarnessConfigs(t *testing.T) {
 	assert.Empty(t, tmplResult.Items, "grove templates should be cascade deleted")
 
 	// Verify hub-scoped env var was NOT deleted
-	hubVars, err := s.ListEnvVars(ctx, store.EnvVarFilter{Scope: store.ScopeHub, ScopeID: store.ScopeIDHub})
+	hubVars, err := s.ListEnvVars(ctx, store.EnvVarFilter{Scope: store.ScopeHub, ScopeID: "test-hub-id"})
 	require.NoError(t, err)
 	assert.Len(t, hubVars, 1, "hub-scoped env var should not be affected")
 }

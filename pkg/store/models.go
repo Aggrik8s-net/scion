@@ -692,10 +692,10 @@ const (
 	ScopeRuntimeBroker = "runtime_broker"
 )
 
-// ScopeIDHub is the well-known scope ID for hub-scoped env vars and secrets.
-// Since there is exactly one hub, this constant is used as a fixed sentinel
-// (analogous to how user scope uses the user's ID).
-const ScopeIDHub = "hub"
+// ScopeIDHub was previously a fixed sentinel "hub". It is now the hub's
+// instance ID, resolved at startup from config or hostname hash.
+// All call sites must pass the resolved hub ID instead of this constant.
+// Removed to force compile-time breakage at all callers.
 
 // InjectionMode constants for environment variables.
 const (

@@ -110,4 +110,7 @@ type SecretBackend interface {
 	// Resolve collects and merges secrets from all applicable scopes for an agent.
 	// Scopes are resolved in order: user < grove < runtime_broker (later overrides earlier).
 	Resolve(ctx context.Context, userID, groveID, brokerID string) ([]SecretWithValue, error)
+
+	// HubID returns the hub instance ID used for hub-scoped secret namespacing.
+	HubID() string
 }

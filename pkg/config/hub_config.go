@@ -15,6 +15,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -58,6 +60,30 @@ type HubServerConfig struct {
 	// SoftDeleteRetainFiles controls whether workspace files are preserved during soft-delete.
 	// When true, the broker skips file cleanup for soft-deleted agents.
 	SoftDeleteRetainFiles bool `json:"softDeleteRetainFiles" yaml:"softDeleteRetainFiles" koanf:"softDeleteRetainFiles"`
+
+	// HubID is a unique identifier for this hub instance.
+	// Used to namespace secrets and other hub-scoped resources in shared GCP projects.
+	// Defaults to sha256(hostname)[:12] if not set.
+	HubID string `json:"hubId" yaml:"hubId" koanf:"hubId"`
+}
+
+// DefaultHubID generates a deterministic hub instance ID from the machine hostname.
+// The ID is a 12-character hex string derived from SHA-256 of the hostname.
+func DefaultHubID() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
+	}
+	h := sha256.Sum256([]byte(hostname))
+	return hex.EncodeToString(h[:6]) // 12 hex chars
+}
+
+// ResolveHubID returns the configured HubID if set, otherwise generates one from hostname.
+func (c *HubServerConfig) ResolveHubID() string {
+	if c.HubID != "" {
+		return c.HubID
+	}
+	return DefaultHubID()
 }
 
 // RuntimeBrokerConfig holds configuration for the Runtime Broker API server.
@@ -522,6 +548,7 @@ func envKeyToConfigKey(envKey string) string {
 		"adminemails":          "adminEmails",
 		"gcpprojectid":         "gcpProjectId",
 		"gcpcredentials":       "gcpCredentials",
+		"hubid":                "hubId",
 		"adminmode":            "adminMode",
 		"maintenancemessage":   "maintenanceMessage",
 	}

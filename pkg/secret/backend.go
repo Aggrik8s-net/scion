@@ -36,12 +36,13 @@ type GCPBackendConfig struct {
 // NewBackend creates a SecretBackend of the specified type.
 // The "local" backend wraps the given SecretStore directly.
 // The "gcpsm" backend uses a hybrid approach: metadata in the Hub DB, values in GCP SM.
-func NewBackend(ctx context.Context, backendType string, s store.SecretStore, gcpCfg GCPBackendConfig) (SecretBackend, error) {
+// The hubID parameter is the unique hub instance identifier used for secret namespacing.
+func NewBackend(ctx context.Context, backendType string, s store.SecretStore, gcpCfg GCPBackendConfig, hubID string) (SecretBackend, error) {
 	switch backendType {
 	case BackendLocal, "":
-		return NewLocalBackend(s), nil
+		return NewLocalBackend(s, hubID), nil
 	case BackendGCPSM:
-		return NewGCPBackend(ctx, s, gcpCfg)
+		return NewGCPBackend(ctx, s, gcpCfg, hubID)
 	default:
 		return nil, fmt.Errorf("unknown secrets backend type: %q (supported: %q, %q)", backendType, BackendLocal, BackendGCPSM)
 	}

@@ -440,6 +440,7 @@ type Server struct {
 	events                 EventPublisher          // Event publisher for real-time SSE updates
 	notificationDispatcher *NotificationDispatcher // Notification dispatcher for agent status events
 	maintenance            *MaintenanceState       // Runtime maintenance mode state
+	hubID                  string                  // Unique hub instance ID for secret namespacing
 	embeddedBrokerID       string                  // Broker ID when running in hub+broker combo mode
 	scheduler              *Scheduler              // Unified scheduler for recurring tasks
 	cleanupOnce            sync.Once               // Ensures CleanupResources runs only once
@@ -663,9 +664,11 @@ func (s *Server) ensureSigningKey(ctx context.Context, keyName string, existingK
 		return existingKey, nil
 	}
 
+	hubID := s.hubID
+
 	// Try to load from the secret backend if configured
 	if s.secretBackend != nil {
-		sv, err := s.secretBackend.Get(ctx, keyName, store.ScopeHub, "hub")
+		sv, err := s.secretBackend.Get(ctx, keyName, store.ScopeHub, hubID)
 		if err == nil {
 			slog.Info("Loaded existing signing key from secret backend", "key", keyName)
 			return base64.StdEncoding.DecodeString(sv.Value)
@@ -676,7 +679,7 @@ func (s *Server) ensureSigningKey(ctx context.Context, keyName string, existingK
 	}
 
 	// Fallback: try loading from the store directly (for migration/local dev)
-	val, err := s.store.GetSecretValue(ctx, keyName, store.ScopeHub, "hub")
+	val, err := s.store.GetSecretValue(ctx, keyName, store.ScopeHub, hubID)
 	if err == nil {
 		slog.Info("Loaded existing signing key from store", "key", keyName)
 		return base64.StdEncoding.DecodeString(val)
@@ -699,7 +702,7 @@ func (s *Server) ensureSigningKey(ctx context.Context, keyName string, existingK
 			Name:        keyName,
 			Value:       encodedKey,
 			Scope:       store.ScopeHub,
-			ScopeID:     "hub",
+			ScopeID:     hubID,
 			Description: fmt.Sprintf("Hub signing key for %s", keyName),
 		}
 		if _, _, err := s.secretBackend.Set(ctx, input); err == nil {
@@ -716,7 +719,7 @@ func (s *Server) ensureSigningKey(ctx context.Context, keyName string, existingK
 		Key:            keyName,
 		EncryptedValue: encodedKey,
 		Scope:          store.ScopeHub,
-		ScopeID:        "hub",
+		ScopeID:        hubID,
 		Description:    fmt.Sprintf("Hub signing key for %s", keyName),
 	}
 	if _, err := s.store.UpsertSecret(ctx, sec); err != nil {
@@ -822,6 +825,20 @@ func (s *Server) GetStorage() storage.Storage {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.storage
+}
+
+// SetHubID sets the unique hub instance ID for secret namespacing.
+func (s *Server) SetHubID(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hubID = id
+}
+
+// HubID returns the hub instance ID. Thread-safe.
+func (s *Server) HubID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.hubID
 }
 
 // SetSecretBackend sets the secret backend for pluggable secret storage.
@@ -1019,7 +1036,8 @@ func (s *Server) CreateAuthenticatedDispatcher() *HTTPAgentDispatcher {
 		slog.Info("Configure via: hub.endpoint in server.yaml or SCION_SERVER_HUB_ENDPOINT env var")
 	}
 
-	// Pass secret backend to dispatcher if configured
+	// Pass hub ID and secret backend to dispatcher if configured
+	dispatcher.SetHubID(s.hubID)
 	if s.secretBackend != nil {
 		dispatcher.SetSecretBackend(s.secretBackend)
 	}

@@ -5719,7 +5719,7 @@ func (s *Server) resolveEnvSecretAccess(w http.ResponseWriter, r *http.Request, 
 			Forbidden(w)
 			return "", false
 		}
-		return store.ScopeIDHub, true
+		return s.hubID, true
 
 	default:
 		BadRequest(w, "invalid scope: "+scope)

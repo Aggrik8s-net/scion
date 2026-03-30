@@ -39,7 +39,7 @@ func createTestStore(t *testing.T) store.SecretStore {
 func createTestBackend(t *testing.T) (*LocalBackend, store.SecretStore) {
 	t.Helper()
 	s := createTestStore(t)
-	return NewLocalBackend(s), s
+	return NewLocalBackend(s, "test-hub-id"), s
 }
 
 // seedSecret inserts a secret directly into the store for testing read operations.

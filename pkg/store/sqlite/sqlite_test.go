@@ -1820,7 +1820,7 @@ func TestCascadeDeleteEnvVarsSecrets(t *testing.T) {
 	// Create a hub-scoped env var (should not be deleted)
 	require.NoError(t, s.CreateEnvVar(ctx, &store.EnvVar{
 		ID: api.NewUUID(), Key: "HUB_VAR", Value: "hub",
-		Scope: store.ScopeHub, ScopeID: store.ScopeIDHub,
+		Scope: store.ScopeHub, ScopeID: "test-hub-id",
 	}))
 
 	// Delete by scope
@@ -1842,7 +1842,7 @@ func TestCascadeDeleteEnvVarsSecrets(t *testing.T) {
 	assert.Empty(t, secrets)
 
 	// Verify hub-scoped env var still exists
-	hubVars, err := s.ListEnvVars(ctx, store.EnvVarFilter{Scope: store.ScopeHub, ScopeID: store.ScopeIDHub})
+	hubVars, err := s.ListEnvVars(ctx, store.EnvVarFilter{Scope: store.ScopeHub, ScopeID: "test-hub-id"})
 	require.NoError(t, err)
 	assert.Len(t, hubVars, 1)
 

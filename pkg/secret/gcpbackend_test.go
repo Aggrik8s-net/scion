@@ -146,7 +146,7 @@ func createTestGCPBackend(t *testing.T) (*GCPBackend, *mockSMClient) {
 		t.Fatalf("failed to migrate test store: %v", err)
 	}
 	mock := newMockSMClient()
-	backend := NewGCPBackendWithClient(s, mock, "test-project")
+	backend := NewGCPBackendWithClient(s, mock, "test-project", "test-hub-id")
 	return backend, mock
 }
 
@@ -388,15 +388,16 @@ func TestGCPBackend_Resolve(t *testing.T) {
 func TestGCPBackend_SecretNameSanitization(t *testing.T) {
 	backend, _ := createTestGCPBackend(t)
 
-	// Helper to compute expected hash prefix
-	hashScopeID := func(scopeID string) string {
-		h := sha256.Sum256([]byte(scopeID))
+	// Helper to compute expected hash prefix (now includes hubID)
+	hashCombined := func(scopeID string) string {
+		combined := "test-hub-id:" + scopeID
+		h := sha256.Sum256([]byte(combined))
 		return hex.EncodeToString(h[:6])
 	}
 
 	// Test the hashed naming convention
 	name := backend.gcpSecretName("MY_KEY", "user", "user-123")
-	expectedHash := hashScopeID("user-123")
+	expectedHash := hashCombined("user-123")
 	expectedPrefix := "scion-user-" + expectedHash + "-"
 	if !strings.HasPrefix(name, expectedPrefix) {
 		t.Errorf("expected prefix %q, got name %q", expectedPrefix, name)
@@ -421,7 +422,7 @@ func TestGCPBackend_SecretNameSanitization(t *testing.T) {
 
 	// Test sanitization of special characters in name (scopeID is hashed, not sanitized)
 	name = backend.gcpSecretName("my.key/with spaces", "grove", "grove@id")
-	expectedHash = hashScopeID("grove@id")
+	expectedHash = hashCombined("grove@id")
 	expectedFull := fmt.Sprintf("scion-grove-%s-my-key-with-spaces", expectedHash)
 	if name != expectedFull {
 		t.Errorf("expected sanitized name %q, got %q", expectedFull, name)
@@ -483,12 +484,13 @@ func TestGCPBackend_Labels(t *testing.T) {
 	for _, sec := range mock.secrets {
 		labels := sec.Labels
 		expectedLabels := map[string]string{
-			"scion-scope":    "user",
-			"scion-scope-id": "user-1",
-			"scion-type":     "environment",
-			"scion-name":     "api_key",
-			"scion-target":   "anthropic_api_key",
-			"scion-userid":   "alice-example-com",
+			"scion-scope":        "user",
+			"scion-scope-id":     "user-1",
+			"scion-type":         "environment",
+			"scion-name":         "api_key",
+			"scion-target":       "anthropic_api_key",
+			"scion-userid":       "alice-example-com",
+			"scion-hub-hostname": sanitizeLabel(hostname()),
 		}
 		for k, expected := range expectedLabels {
 			got, ok := labels[k]
@@ -536,8 +538,8 @@ func TestGCPBackend_Labels_NoUserIDForNonUserScope(t *testing.T) {
 			if _, exists := sec.Labels["scion-userid"]; exists {
 				t.Errorf("scion-userid label should not be present for scope %q", scope)
 			}
-			if len(sec.Labels) != 5 {
-				t.Errorf("expected 5 labels for scope %q, got %d: %v", scope, len(sec.Labels), sec.Labels)
+			if len(sec.Labels) != 6 {
+				t.Errorf("expected 6 labels for scope %q, got %d: %v", scope, len(sec.Labels), sec.Labels)
 			}
 		})
 	}

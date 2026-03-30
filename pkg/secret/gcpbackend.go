@@ -19,6 +19,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
@@ -35,10 +36,11 @@ type GCPBackend struct {
 	store     store.SecretStore
 	smClient  SMClient
 	projectID string
+	hubID     string
 }
 
 // NewGCPBackend creates a GCPBackend with a real GCP Secret Manager client.
-func NewGCPBackend(ctx context.Context, s store.SecretStore, cfg GCPBackendConfig) (*GCPBackend, error) {
+func NewGCPBackend(ctx context.Context, s store.SecretStore, cfg GCPBackendConfig, hubID string) (*GCPBackend, error) {
 	if cfg.ProjectID == "" {
 		return nil, fmt.Errorf("gcpsm backend requires a GCP project ID")
 	}
@@ -50,16 +52,23 @@ func NewGCPBackend(ctx context.Context, s store.SecretStore, cfg GCPBackendConfi
 		store:     s,
 		smClient:  smClient,
 		projectID: cfg.ProjectID,
+		hubID:     hubID,
 	}, nil
 }
 
 // NewGCPBackendWithClient creates a GCPBackend with a provided SMClient (for testing).
-func NewGCPBackendWithClient(s store.SecretStore, client SMClient, projectID string) *GCPBackend {
+func NewGCPBackendWithClient(s store.SecretStore, client SMClient, projectID, hubID string) *GCPBackend {
 	return &GCPBackend{
 		store:     s,
 		smClient:  client,
 		projectID: projectID,
+		hubID:     hubID,
 	}
+}
+
+// HubID returns the hub instance ID used for hub-scoped secret namespacing.
+func (b *GCPBackend) HubID() string {
+	return b.hubID
 }
 
 func (b *GCPBackend) Get(ctx context.Context, name, scope, scopeID string) (*SecretWithValue, error) {
@@ -69,9 +78,15 @@ func (b *GCPBackend) Get(ctx context.Context, name, scope, scopeID string) (*Sec
 		return nil, err
 	}
 
-	// Get value from GCP SM
-	smName := b.gcpSecretName(name, scope, scopeID)
-	value, err := b.accessLatestVersion(ctx, smName)
+	// Prefer the stored SecretRef for GCP SM lookup (handles secrets created under
+	// a previous naming scheme). Fall back to computing the name if no ref is stored.
+	var value string
+	if smPath, ok := extractGCPSMPath(s.SecretRef); ok {
+		value, err = b.accessLatestVersionByPath(ctx, smPath)
+	} else {
+		smName := b.gcpSecretName(name, scope, scopeID)
+		value, err = b.accessLatestVersion(ctx, smName)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to access secret value from GCP SM: %w", err)
 	}
@@ -81,6 +96,26 @@ func (b *GCPBackend) Get(ctx context.Context, name, scope, scopeID string) (*Sec
 		SecretMeta: *meta,
 		Value:      value,
 	}, nil
+}
+
+// extractGCPSMPath extracts the full GCP SM resource path from a stored SecretRef.
+// Returns the path and true if the ref is a gcpsm ref, empty string and false otherwise.
+func extractGCPSMPath(ref string) (string, bool) {
+	if strings.HasPrefix(ref, "gcpsm:") {
+		return strings.TrimPrefix(ref, "gcpsm:"), true
+	}
+	return "", false
+}
+
+// accessLatestVersionByPath retrieves the latest version of a secret using a full GCP SM path.
+func (b *GCPBackend) accessLatestVersionByPath(ctx context.Context, smPath string) (string, error) {
+	resp, err := b.smClient.AccessSecretVersion(ctx, &smpb.AccessSecretVersionRequest{
+		Name: smPath + "/versions/latest",
+	})
+	if err != nil {
+		return "", err
+	}
+	return string(resp.Payload.Data), nil
 }
 
 func (b *GCPBackend) Set(ctx context.Context, input *SetSecretInput) (bool, *SecretMeta, error) {
@@ -108,7 +143,7 @@ func (b *GCPBackend) Set(ctx context.Context, input *SetSecretInput) (bool, *Sec
 							Automatic: &smpb.Replication_Automatic{},
 						},
 					},
-					Labels: buildLabels(input, target),
+					Labels: buildLabels(input, target, hostname()),
 				},
 			})
 			if err != nil {
@@ -191,7 +226,7 @@ func (b *GCPBackend) Resolve(ctx context.Context, userID, groveID, brokerID stri
 
 	var scopes []scopeEntry
 	// Hub scope is always included as lowest precedence
-	scopes = append(scopes, scopeEntry{scope: store.ScopeHub, scopeID: store.ScopeIDHub})
+	scopes = append(scopes, scopeEntry{scope: store.ScopeHub, scopeID: b.hubID})
 	if userID != "" {
 		scopes = append(scopes, scopeEntry{scope: store.ScopeUser, scopeID: userID})
 	}
@@ -281,11 +316,12 @@ func (b *GCPBackend) AccessSecretValueByRef(ctx context.Context, smPath string) 
 }
 
 // gcpSecretName builds a sanitized GCP SM secret ID from the scion secret identity.
-// Format: scion-{scope}-{sha256(scopeID)[:12]}-{name}
-// The scopeID is hashed to avoid collisions when different IDs sanitize to the same string,
-// and to keep the total length well within the 255-char GCP SM limit.
+// Format: scion-{scope}-{sha256(hubID:scopeID)[:12]}-{name}
+// The hubID is combined with the scopeID before hashing to ensure uniqueness
+// across hub instances sharing the same GCP project.
 func (b *GCPBackend) gcpSecretName(name, scope, scopeID string) string {
-	hash := sha256.Sum256([]byte(scopeID))
+	combined := b.hubID + ":" + scopeID
+	hash := sha256.Sum256([]byte(combined))
 	shortHash := hex.EncodeToString(hash[:6]) // 6 bytes = 12 hex chars
 	return sanitizeSecretID(fmt.Sprintf("scion-%s-%s-%s", scope, shortHash, name))
 }
@@ -315,16 +351,27 @@ func sanitizeLabel(s string) string {
 
 // buildLabels constructs the GCP SM labels map for a secret.
 // For user-scoped secrets with a known email, a scion-userid label is added.
-func buildLabels(input *SetSecretInput, target string) map[string]string {
+// The hubHostname label allows filtering secrets by hub in the GCP console.
+func buildLabels(input *SetSecretInput, target, hubHostname string) map[string]string {
 	labels := map[string]string{
-		"scion-scope":    sanitizeLabel(input.Scope),
-		"scion-scope-id": sanitizeLabel(input.ScopeID),
-		"scion-type":     sanitizeLabel(input.SecretType),
-		"scion-name":     sanitizeLabel(input.Name),
-		"scion-target":   sanitizeLabel(target),
+		"scion-scope":        sanitizeLabel(input.Scope),
+		"scion-scope-id":     sanitizeLabel(input.ScopeID),
+		"scion-type":         sanitizeLabel(input.SecretType),
+		"scion-name":         sanitizeLabel(input.Name),
+		"scion-target":       sanitizeLabel(target),
+		"scion-hub-hostname": sanitizeLabel(hubHostname),
 	}
 	if input.Scope == ScopeUser && input.UserEmail != "" {
 		labels["scion-userid"] = sanitizeLabel(input.UserEmail)
 	}
 	return labels
+}
+
+// hostname returns the machine hostname for labeling, or "unknown" if unavailable.
+func hostname() string {
+	h, err := os.Hostname()
+	if err != nil {
+		return "unknown"
+	}
+	return h
 }

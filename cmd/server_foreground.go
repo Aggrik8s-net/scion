@@ -721,11 +721,16 @@ func initHubServer(ctx context.Context, cfg *config.GlobalConfig, s store.Store,
 	// Initialize storage
 	initHubStorage(ctx, hubSrv, cfg, globalDir)
 
+	// Resolve hub instance ID for secret namespacing
+	hubID := cfg.Hub.ResolveHubID()
+	hubSrv.SetHubID(hubID)
+	log.Printf("Hub instance ID: %s", hubID)
+
 	// Initialize secret backend
 	secretBackend, err := secret.NewBackend(ctx, cfg.Secrets.Backend, s, secret.GCPBackendConfig{
 		ProjectID:       cfg.Secrets.GCPProjectID,
 		CredentialsJSON: cfg.Secrets.GCPCredentials,
-	})
+	}, hubID)
 	if err != nil {
 		log.Printf("Warning: failed to initialize secret backend: %v", err)
 	} else {
