@@ -1716,6 +1716,8 @@ func (s *Server) registerRoutes() {
 
 	// Admin system endpoints
 	s.mux.HandleFunc("/api/v1/admin/maintenance", s.handleAdminMaintenance)
+	s.mux.HandleFunc("/api/v1/admin/maintenance/operations", s.handleAdminMaintenanceOps)
+	s.mux.HandleFunc("/api/v1/admin/maintenance/operations/", s.handleAdminMaintenanceOps)
 	s.mux.HandleFunc("/api/v1/admin/scheduler", s.handleAdminScheduler)
 	s.mux.HandleFunc("/api/v1/admin/server-config", s.handleAdminServerConfig)
 

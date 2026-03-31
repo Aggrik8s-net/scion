@@ -96,6 +96,9 @@ type Store interface {
 
 	// Message operations (Bidirectional Human-Agent Messaging)
 	MessageStore
+
+	// Maintenance operations (Admin Maintenance Panel)
+	MaintenanceStore
 }
 
 // AgentStore defines agent-related persistence operations.
@@ -975,4 +978,32 @@ type MessageStore interface {
 	// PurgeOldMessages removes read messages older than readCutoff and
 	// unread messages older than unreadCutoff. Returns count removed.
 	PurgeOldMessages(ctx context.Context, readCutoff time.Time, unreadCutoff time.Time) (int, error)
+}
+
+// =============================================================================
+// Maintenance Operations (Admin Maintenance Panel)
+// =============================================================================
+
+// MaintenanceStore defines storage operations for maintenance tasks.
+type MaintenanceStore interface {
+	// ListMaintenanceOperations returns all registered operations and migrations.
+	ListMaintenanceOperations(ctx context.Context) ([]MaintenanceOperation, error)
+
+	// GetMaintenanceOperation returns a single operation by key.
+	GetMaintenanceOperation(ctx context.Context, key string) (*MaintenanceOperation, error)
+
+	// UpdateMaintenanceOperation updates an operation's status and result fields.
+	UpdateMaintenanceOperation(ctx context.Context, op *MaintenanceOperation) error
+
+	// CreateMaintenanceRun inserts a new run record.
+	CreateMaintenanceRun(ctx context.Context, run *MaintenanceOperationRun) error
+
+	// UpdateMaintenanceRun updates a run's status, result, and log.
+	UpdateMaintenanceRun(ctx context.Context, run *MaintenanceOperationRun) error
+
+	// GetMaintenanceRun returns a single run by ID.
+	GetMaintenanceRun(ctx context.Context, id string) (*MaintenanceOperationRun, error)
+
+	// ListMaintenanceRuns returns runs for a given operation key, ordered by started_at DESC.
+	ListMaintenanceRuns(ctx context.Context, operationKey string, limit int) ([]MaintenanceOperationRun, error)
 }

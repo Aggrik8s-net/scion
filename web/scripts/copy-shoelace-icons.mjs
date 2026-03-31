@@ -122,6 +122,7 @@ const USED_ICONS = [
   'trash',
   'upload',
   'wifi-off',
+  'wrench-adjustable',
   'x-circle',
   'x-circle-fill',
   'x-lg',

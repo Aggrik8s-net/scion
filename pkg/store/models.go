@@ -1254,3 +1254,49 @@ type GitIdentityConfig struct {
 	// Email is the git author/committer email (used when mode is "custom").
 	Email string `json:"email,omitempty"`
 }
+
+// =============================================================================
+// Maintenance Operations (Admin Maintenance Panel)
+// =============================================================================
+
+// MaintenanceOperation represents a registered maintenance operation or migration.
+type MaintenanceOperation struct {
+	ID          string     `json:"id"`
+	Key         string     `json:"key"`
+	Title       string     `json:"title"`
+	Description string     `json:"description"`
+	Category    string     `json:"category"` // "migration" or "operation"
+	Status      string     `json:"status"`   // pending, running, completed, failed
+	CreatedAt   time.Time  `json:"createdAt"`
+	StartedAt   *time.Time `json:"startedAt,omitempty"`
+	CompletedAt *time.Time `json:"completedAt,omitempty"`
+	StartedBy   string     `json:"startedBy,omitempty"`
+	Result      string     `json:"result,omitempty"`
+	Metadata    string     `json:"metadata,omitempty"`
+}
+
+// MaintenanceOperationRun represents a single execution of a repeatable operation.
+type MaintenanceOperationRun struct {
+	ID           string     `json:"id"`
+	OperationKey string     `json:"operationKey"`
+	Status       string     `json:"status"` // running, completed, failed
+	StartedAt    time.Time  `json:"startedAt"`
+	CompletedAt  *time.Time `json:"completedAt,omitempty"`
+	StartedBy    string     `json:"startedBy,omitempty"`
+	Result       string     `json:"result,omitempty"`
+	Log          string     `json:"log,omitempty"`
+}
+
+// Maintenance operation category constants.
+const (
+	MaintenanceCategoryMigration = "migration"
+	MaintenanceCategoryOperation = "operation"
+)
+
+// Maintenance operation status constants.
+const (
+	MaintenanceStatusPending   = "pending"
+	MaintenanceStatusRunning   = "running"
+	MaintenanceStatusCompleted = "completed"
+	MaintenanceStatusFailed    = "failed"
+)

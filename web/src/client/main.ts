@@ -122,6 +122,7 @@ const ROUTES: RouteConfig[] = [
   { pattern: /^\/admin\/users$/, tag: 'scion-page-admin-users', load: () => import('../components/pages/admin-users.js') },
   { pattern: /^\/admin\/groups$/, tag: 'scion-page-admin-groups', load: () => import('../components/pages/admin-groups.js') },
   { pattern: /^\/admin\/groups\/[^/]+$/, tag: 'scion-page-admin-group-detail', load: () => import('../components/pages/admin-group-detail.js') },
+  { pattern: /^\/admin\/maintenance$/, tag: 'scion-page-admin-maintenance', load: () => import('../components/pages/admin-maintenance.js') },
   { pattern: /^\/admin\/server-config$/, tag: 'scion-page-admin-server-config', load: () => import('../components/pages/admin-server-config.js') },
   { pattern: /^\/settings$/, tag: 'scion-page-settings', load: () => import('../components/pages/settings.js') },
   { pattern: /^\/profile\/env$/, tag: 'scion-page-profile-env-vars', load: () => import('../components/pages/profile-env-vars.js') },
@@ -153,7 +154,7 @@ const PROFILE_ROUTES = new Set(['scion-page-profile-env-vars', 'scion-page-profi
 /**
  * Routes that require admin role. Non-admin users are redirected to dashboard.
  */
-const ADMIN_ROUTES = new Set(['scion-page-settings', 'scion-page-admin-scheduler', 'scion-page-admin-users', 'scion-page-admin-groups', 'scion-page-admin-group-detail', 'scion-page-admin-server-config']);
+const ADMIN_ROUTES = new Set(['scion-page-settings', 'scion-page-admin-scheduler', 'scion-page-admin-maintenance', 'scion-page-admin-users', 'scion-page-admin-groups', 'scion-page-admin-group-detail', 'scion-page-admin-server-config']);
 
 /**
  * Initialize the client-side application

@@ -116,6 +116,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		migrationV38,
 		migrationV39,
 		migrationV40,
+		migrationV41,
 	}
 
 	// Create migrations table if not exists
@@ -969,6 +970,83 @@ CREATE INDEX IF NOT EXISTS idx_groves_slug ON groves(slug);
 CREATE INDEX IF NOT EXISTS idx_groves_git_remote ON groves(git_remote);
 CREATE INDEX IF NOT EXISTS idx_groves_owner ON groves(owner_id);
 CREATE INDEX IF NOT EXISTS idx_groves_default_runtime_broker ON groves(default_runtime_broker_id);
+`
+
+// Migration V41: Maintenance operations tables for the admin maintenance panel.
+// Tracks one-time migrations and repeatable operations with execution history.
+const migrationV41 = `
+CREATE TABLE IF NOT EXISTS maintenance_operations (
+    id          TEXT PRIMARY KEY,
+    key         TEXT NOT NULL UNIQUE,
+    title       TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    category    TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at  TIMESTAMP,
+    completed_at TIMESTAMP,
+    started_by  TEXT,
+    result      TEXT,
+    metadata    TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_maintenance_ops_category ON maintenance_operations(category);
+CREATE INDEX IF NOT EXISTS idx_maintenance_ops_status ON maintenance_operations(status);
+
+CREATE TABLE IF NOT EXISTS maintenance_operation_runs (
+    id            TEXT PRIMARY KEY,
+    operation_key TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'running',
+    started_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at  TIMESTAMP,
+    started_by    TEXT,
+    result        TEXT,
+    log           TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (operation_key) REFERENCES maintenance_operations(key)
+);
+CREATE INDEX IF NOT EXISTS idx_maintenance_runs_key ON maintenance_operation_runs(operation_key);
+CREATE INDEX IF NOT EXISTS idx_maintenance_runs_started ON maintenance_operation_runs(started_at DESC);
+
+-- Seed: one-time migrations
+INSERT INTO maintenance_operations (id, key, title, description, category, status)
+VALUES (
+    lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' || hex(randomblob(6))),
+    'secret-hub-id-migration',
+    'Secret Hub ID Namespace Migration',
+    'Migrates hub-scoped secrets from the legacy fixed "hub" scope ID to the per-instance hub ID. Required when upgrading a hub that was created before the hub ID namespacing feature. Only needed for GCP Secret Manager backend.',
+    'migration',
+    'pending'
+);
+
+-- Seed: repeatable operations
+INSERT INTO maintenance_operations (id, key, title, description, category, status)
+VALUES (
+    lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' || hex(randomblob(6))),
+    'pull-images',
+    'Pull Container Images',
+    'Pulls the latest container images for all configured harnesses from the image registry.',
+    'operation',
+    'pending'
+);
+
+INSERT INTO maintenance_operations (id, key, title, description, category, status)
+VALUES (
+    lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' || hex(randomblob(6))),
+    'rebuild-server',
+    'Rebuild Server from Git',
+    'Pulls latest code from the repository, rebuilds the server binary and web assets, then restarts the hub service. Equivalent to the fast-deploy mode of gce-start-hub.sh.',
+    'operation',
+    'pending'
+);
+
+INSERT INTO maintenance_operations (id, key, title, description, category, status)
+VALUES (
+    lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' || hex(randomblob(6))),
+    'rebuild-web',
+    'Rebuild Web Frontend',
+    'Rebuilds only the web frontend assets from source without restarting the server binary. Changes take effect on the next page load.',
+    'operation',
+    'pending'
+);
 `
 
 // Helper functions for JSON marshaling/unmarshaling
