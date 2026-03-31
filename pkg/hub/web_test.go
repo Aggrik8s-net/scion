@@ -703,6 +703,83 @@ func TestDevAuthMiddleware_GeneratesHubTokens(t *testing.T) {
 		"dev-auth should generate Hub JWT, got Authorization: %q", capturedAuth)
 }
 
+func TestSessionToBearerMiddleware_SigningKeyRotation(t *testing.T) {
+	// Simulate signing key rotation: establish a session with tokens signed
+	// by key A, then rotate the server to key B. API requests should get a
+	// 401 with code "session_expired" and the session should be cleared.
+	oldSvc, err := NewUserTokenService(UserTokenConfig{
+		SigningKey: []byte("old-signing-key-0123456789abcdef"),
+	})
+	require.NoError(t, err)
+
+	ws := newDevAuthWebServer(t)
+	ws.SetUserTokenService(oldSvc)
+
+	var capturedAuthHeader string
+	mockHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedAuthHeader = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	})
+	ws.MountHubAPI(mockHandler, func(ctx context.Context) error { return nil })
+
+	handler := ws.Handler()
+
+	// Step 1: Establish a session with tokens signed by the old key.
+	req1 := httptest.NewRequest("GET", "/api/v1/groves", nil)
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+	require.Equal(t, http.StatusOK, rec1.Result().StatusCode)
+	require.True(t, strings.HasPrefix(capturedAuthHeader, "Bearer "),
+		"initial request should have a valid Bearer token")
+
+	sessionCookies := rec1.Result().Cookies()
+
+	// Step 2: Rotate the signing key.
+	newSvc, err := NewUserTokenService(UserTokenConfig{
+		SigningKey: []byte("new-signing-key-0123456789abcdef"),
+	})
+	require.NoError(t, err)
+	ws.SetUserTokenService(newSvc)
+
+	// Step 3: Make an API request with the old session cookie.
+	capturedAuthHeader = ""
+	req2 := httptest.NewRequest("GET", "/api/v1/groves", nil)
+	req2.Header.Set("Accept", "text/html,application/xhtml+xml") // browser request
+	for _, c := range sessionCookies {
+		req2.AddCookie(c)
+	}
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+
+	// The middleware should detect the invalid token and return 401.
+	assert.Equal(t, http.StatusUnauthorized, rec2.Result().StatusCode,
+		"rotated signing key should result in 401")
+
+	// Verify the response body contains session_expired error code.
+	var errResp struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	err = json.NewDecoder(rec2.Body).Decode(&errResp)
+	require.NoError(t, err)
+	assert.Equal(t, "session_expired", errResp.Error.Code,
+		"error code should be session_expired")
+
+	// Step 4: Verify the session cookie was cleared (MaxAge=-1).
+	// In a non-dev environment, the next page load would redirect to login
+	// since the session user info was removed.
+	var sessionCleared bool
+	for _, c := range rec2.Result().Cookies() {
+		if c.Name == "scion_sess" && c.MaxAge < 0 {
+			sessionCleared = true
+		}
+	}
+	assert.True(t, sessionCleared,
+		"session cookie should be cleared (MaxAge=-1) after signing key rotation")
+}
+
 func TestDevAuth_AutoLogin(t *testing.T) {
 	ws := newDevAuthWebServer(t)
 

@@ -397,6 +397,8 @@ export class ScionLoginPage extends LitElement {
 
   private getErrorMessage(): string {
     const messages: Record<string, string> = {
+      session_expired:
+        'You have been signed out because the server security credentials were updated. Please sign in again.',
       session_error:
         'Your session could not be saved. Please contact an administrator if this persists.',
       state_mismatch:

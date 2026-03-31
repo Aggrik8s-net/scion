@@ -499,10 +499,71 @@ func (ws *WebServer) sessionToBearerMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Check token expiry and refresh if needed.
+		// Validate the access token. If the signing key was rotated,
+		// the token will fail signature verification and we must
+		// force the user to re-authenticate.
+		tokenValid := false
+		if ws.userTokenSvc != nil {
+			if _, err := ws.userTokenSvc.ValidateUserToken(accessToken); err == nil {
+				tokenValid = true
+			}
+		} else {
+			// No token service — pass through and let Hub decide.
+			tokenValid = true
+		}
+
+		// If token is invalid (expired or bad signature), try to refresh.
+		if !tokenValid {
+			refreshToken, _ := session.Values[sessKeyHubRefreshToken].(string)
+			if refreshToken != "" && ws.userTokenSvc != nil {
+				newAccess, newRefresh, expiresIn, err := ws.userTokenSvc.RefreshTokens(refreshToken)
+				if err == nil {
+					accessToken = newAccess
+					tokenValid = true
+					session.Values[sessKeyHubAccessToken] = newAccess
+					session.Values[sessKeyHubRefreshToken] = newRefresh
+					session.Values[sessKeyHubTokenExpiry] = time.Now().Add(time.Duration(expiresIn) * time.Second).UnixMilli()
+					if err := session.Save(r, w); err != nil {
+						slog.Warn("Failed to persist refreshed Hub token to session", "error", err)
+					}
+				} else {
+					slog.Debug("Failed to refresh Hub token", "error", err)
+				}
+			}
+		}
+
+		// If token is still invalid after refresh attempt, the signing
+		// key was likely rotated. Clear the session and force re-login.
+		if !tokenValid {
+			slog.Info("Hub token irrecoverably invalid, clearing session",
+				"user", session.Values[sessKeyUserEmail])
+			for key := range session.Values {
+				delete(session.Values, key)
+			}
+			session.Options.MaxAge = -1
+			if err := session.Save(r, w); err != nil {
+				slog.Warn("Failed to clear invalid session", "error", err)
+			}
+
+			if isBrowserRequest(r) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"error": map[string]string{
+						"code":    "session_expired",
+						"message": "Your session has expired. Please sign in again.",
+					},
+				})
+				return
+			}
+			// Non-browser: let Hub return 401.
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Check token expiry and proactively refresh if needed.
 		if expiryMs, ok := session.Values[sessKeyHubTokenExpiry].(int64); ok {
 			if time.Now().UnixMilli() >= expiryMs {
-				// Token expired — try to refresh.
 				refreshToken, _ := session.Values[sessKeyHubRefreshToken].(string)
 				if refreshToken != "" && ws.userTokenSvc != nil {
 					newAccess, newRefresh, expiresIn, err := ws.userTokenSvc.RefreshTokens(refreshToken)
@@ -514,9 +575,6 @@ func (ws *WebServer) sessionToBearerMiddleware(next http.Handler) http.Handler {
 						if err := session.Save(r, w); err != nil {
 							slog.Warn("Failed to persist refreshed Hub token to session", "error", err)
 						}
-					} else {
-						slog.Debug("Failed to refresh Hub token", "error", err)
-						// Fall through with expired token; Hub auth will reject it.
 					}
 				}
 			}
