@@ -22,6 +22,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -171,6 +172,18 @@ func (c *Client) trackRateLimit(resp *http.Response) {
 	}
 }
 
+// KeyFingerprint returns a short SHA-256 fingerprint of the RSA public key
+// for diagnostic logging (first 16 hex chars). This helps identify which key
+// is being used without exposing the key itself.
+func KeyFingerprint(key *rsa.PrivateKey) string {
+	pubDER, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		return "unknown"
+	}
+	hash := sha256.Sum256(pubDER)
+	return hex.EncodeToString(hash[:8])
+}
+
 // NewClient creates a new GitHub App client from the given config.
 // It parses the private key (from inline PEM or file path) and validates it.
 func NewClient(cfg Config, keyData []byte) (*Client, error) {
@@ -186,6 +199,12 @@ func NewClient(cfg Config, keyData []byte) (*Client, error) {
 			Err:       err,
 		}
 	}
+
+	slog.Debug("GitHub App client created",
+		"app_id", cfg.AppID,
+		"key_fingerprint", KeyFingerprint(privateKey),
+		"key_bits", privateKey.N.BitLen(),
+	)
 
 	apiBaseURL := cfg.APIBaseURL
 	if apiBaseURL == "" {
@@ -398,13 +417,13 @@ func classifyGitHubError(statusCode int, body []byte) *TokenMintError {
 			return &TokenMintError{
 				ErrorCode:  ErrCodeAppNotFound,
 				StatusCode: statusCode,
-				Message:    fmt.Sprintf("GitHub App not found: %s", msg),
+				Message:    fmt.Sprintf("GitHub App not found — verify the App ID in Admin > Server Config > GitHub App. GitHub says: %s", msg),
 			}
 		}
 		return &TokenMintError{
 			ErrorCode:  ErrCodePrivateKeyInvalid,
 			StatusCode: statusCode,
-			Message:    fmt.Sprintf("Authentication failed: %s", msg),
+			Message:    fmt.Sprintf("GitHub rejected the JWT — the private key likely doesn't match the App. Regenerate the key in GitHub App settings and re-upload it in Admin > Server Config. GitHub says: %s", msg),
 		}
 
 	case http.StatusForbidden:

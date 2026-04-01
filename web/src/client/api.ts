@@ -40,6 +40,7 @@ export interface AccessDeniedDetail {
  * error details, but does NOT re-throw or alter the response.
  */
 const API_SLOW_THRESHOLD_MS = 2000;
+let sessionExpiredRedirectPending = false;
 
 export async function apiFetch(path: string, options?: RequestInit): Promise<Response> {
   const start = performance.now();
@@ -53,6 +54,17 @@ export async function apiFetch(path: string, options?: RequestInit): Promise<Res
     console.warn(
       `[api] Slow response: ${options?.method ?? 'GET'} ${path} took ${elapsed.toFixed(0)}ms`
     );
+  }
+
+  if (response.status === 401) {
+    // Session expired or signing key rotated — redirect to login.
+    // Use a flag to prevent multiple concurrent redirects.
+    if (!sessionExpiredRedirectPending) {
+      sessionExpiredRedirectPending = true;
+      const returnTo = encodeURIComponent(window.location.pathname);
+      window.location.href = `/login?error=session_expired&returnTo=${returnTo}`;
+    }
+    return response;
   }
 
   if (response.status === 403) {

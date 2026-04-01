@@ -83,11 +83,21 @@ export class SSEClient extends EventTarget {
     this.eventSource.onerror = () => {
       // EventSource fires error when connection drops.
       // Close and attempt manual reconnect with backoff.
+      const readyState = this.eventSource?.readyState;
       if (this.eventSource) {
         this.eventSource.close();
         this.eventSource = null;
       }
-      this.scheduleReconnect();
+
+      // If the connection was never opened (CONNECTING → error), the
+      // server likely returned a non-200 (e.g. 302 redirect to login
+      // after session invalidation). Probe the auth endpoint before
+      // burning through reconnect attempts.
+      if (readyState === EventSource.CONNECTING) {
+        void this.checkAuthAndReconnect();
+      } else {
+        this.scheduleReconnect();
+      }
     };
 
     // Handle state update events from the server
@@ -113,6 +123,26 @@ export class SSEClient extends EventTarget {
         console.error('[SSE] Failed to parse connected event:', err);
       }
     });
+  }
+
+  /**
+   * Check whether the session is still valid before reconnecting.
+   * If the session was invalidated (e.g. signing key rotation),
+   * redirect to the login page instead of retrying.
+   */
+  private async checkAuthAndReconnect(): Promise<void> {
+    try {
+      const resp = await fetch('/auth/me', { credentials: 'include' });
+      if (resp.status === 401 || resp.redirected) {
+        console.warn('[SSE] Session expired, redirecting to login');
+        const returnTo = encodeURIComponent(window.location.pathname);
+        window.location.href = `/login?error=session_expired&returnTo=${returnTo}`;
+        return;
+      }
+    } catch {
+      // Network error — fall through to normal reconnect.
+    }
+    this.scheduleReconnect();
   }
 
   private scheduleReconnect(): void {

@@ -116,6 +116,8 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		migrationV38,
 		migrationV39,
 		migrationV40,
+		migrationV41,
+		migrationV42,
 	}
 
 	// Create migrations table if not exists
@@ -135,6 +137,14 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		return fmt.Errorf("failed to get current schema version: %w", err)
 	}
 
+	// Migrations that require PRAGMA foreign_keys=OFF around the transaction.
+	// SQLite ignores PRAGMA changes inside transactions, so we must disable
+	// foreign keys before BeginTx and re-enable after Commit. Without this,
+	// DROP TABLE on a parent table triggers ON DELETE CASCADE on child tables.
+	foreignKeysOffMigrations := map[int]bool{
+		40: true, // V40 drops and recreates the groves table
+	}
+
 	// Apply pending migrations
 	for i, migration := range migrations {
 		version := i + 1
@@ -142,23 +152,48 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 			continue
 		}
 
+		needsFKOff := foreignKeysOffMigrations[version]
+		if needsFKOff {
+			if _, err := s.db.ExecContext(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
+				return fmt.Errorf("failed to disable foreign keys for migration %d: %w", version, err)
+			}
+		}
+
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
+			if needsFKOff {
+				s.db.ExecContext(ctx, "PRAGMA foreign_keys=ON")
+			}
 			return fmt.Errorf("failed to start transaction for migration %d: %w", version, err)
 		}
 
 		if _, err := tx.ExecContext(ctx, migration); err != nil {
 			tx.Rollback()
+			if needsFKOff {
+				s.db.ExecContext(ctx, "PRAGMA foreign_keys=ON")
+			}
 			return fmt.Errorf("failed to apply migration %d: %w", version, err)
 		}
 
 		if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations (version) VALUES (?)", version); err != nil {
 			tx.Rollback()
+			if needsFKOff {
+				s.db.ExecContext(ctx, "PRAGMA foreign_keys=ON")
+			}
 			return fmt.Errorf("failed to record migration %d: %w", version, err)
 		}
 
 		if err := tx.Commit(); err != nil {
+			if needsFKOff {
+				s.db.ExecContext(ctx, "PRAGMA foreign_keys=ON")
+			}
 			return fmt.Errorf("failed to commit migration %d: %w", version, err)
+		}
+
+		if needsFKOff {
+			if _, err := s.db.ExecContext(ctx, "PRAGMA foreign_keys=ON"); err != nil {
+				return fmt.Errorf("failed to re-enable foreign keys after migration %d: %w", version, err)
+			}
 		}
 	}
 
@@ -895,10 +930,13 @@ CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC);
 // Migration V40: Allow multiple groves per git remote (drop UNIQUE on git_remote),
 // and enforce slug uniqueness (add UNIQUE on slug). Requires table recreation
 // because SQLite does not support ALTER TABLE DROP CONSTRAINT.
+//
+// IMPORTANT: This migration requires foreign_keys=OFF around the DROP TABLE.
+// SQLite ignores PRAGMA changes inside transactions, so the migration runner
+// handles this via the foreignKeysOffMigrations set. The PRAGMA statements are
+// intentionally NOT included in the SQL string.
 const migrationV40 = `
-PRAGMA foreign_keys=OFF;
-
-CREATE TABLE groves_new (
+CREATE TABLE IF NOT EXISTS groves_new (
 	id TEXT PRIMARY KEY,
 	name TEXT NOT NULL,
 	slug TEXT NOT NULL UNIQUE,
@@ -918,7 +956,7 @@ CREATE TABLE groves_new (
 	git_identity TEXT
 );
 
-INSERT INTO groves_new SELECT
+INSERT OR IGNORE INTO groves_new SELECT
 	id, name, slug, git_remote, labels, annotations,
 	created_at, updated_at, created_by, owner_id, visibility,
 	default_runtime_broker_id, shared_dirs,
@@ -926,15 +964,104 @@ INSERT INTO groves_new SELECT
 	git_identity
 FROM groves;
 
-DROP TABLE groves;
+DROP TABLE IF EXISTS groves;
 ALTER TABLE groves_new RENAME TO groves;
 
 CREATE INDEX IF NOT EXISTS idx_groves_slug ON groves(slug);
 CREATE INDEX IF NOT EXISTS idx_groves_git_remote ON groves(git_remote);
 CREATE INDEX IF NOT EXISTS idx_groves_owner ON groves(owner_id);
 CREATE INDEX IF NOT EXISTS idx_groves_default_runtime_broker ON groves(default_runtime_broker_id);
+`
 
-PRAGMA foreign_keys=ON;
+// Migration V41: Maintenance operations tables for the admin maintenance panel.
+// Tracks one-time migrations and repeatable operations with execution history.
+const migrationV41 = `
+CREATE TABLE IF NOT EXISTS maintenance_operations (
+    id          TEXT PRIMARY KEY,
+    key         TEXT NOT NULL UNIQUE,
+    title       TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    category    TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at  TIMESTAMP,
+    completed_at TIMESTAMP,
+    started_by  TEXT,
+    result      TEXT,
+    metadata    TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_maintenance_ops_category ON maintenance_operations(category);
+CREATE INDEX IF NOT EXISTS idx_maintenance_ops_status ON maintenance_operations(status);
+
+CREATE TABLE IF NOT EXISTS maintenance_operation_runs (
+    id            TEXT PRIMARY KEY,
+    operation_key TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'running',
+    started_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at  TIMESTAMP,
+    started_by    TEXT,
+    result        TEXT,
+    log           TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (operation_key) REFERENCES maintenance_operations(key)
+);
+CREATE INDEX IF NOT EXISTS idx_maintenance_runs_key ON maintenance_operation_runs(operation_key);
+CREATE INDEX IF NOT EXISTS idx_maintenance_runs_started ON maintenance_operation_runs(started_at DESC);
+
+-- Seed: one-time migrations
+INSERT INTO maintenance_operations (id, key, title, description, category, status)
+VALUES (
+    lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' || hex(randomblob(6))),
+    'secret-hub-id-migration',
+    'Secret Hub ID Namespace Migration',
+    'Migrates hub-scoped secrets from the legacy fixed "hub" scope ID to the per-instance hub ID. Required when upgrading a hub that was created before the hub ID namespacing feature. Only needed for GCP Secret Manager backend.',
+    'migration',
+    'pending'
+);
+
+-- Seed: repeatable operations
+INSERT INTO maintenance_operations (id, key, title, description, category, status)
+VALUES (
+    lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' || hex(randomblob(6))),
+    'pull-images',
+    'Pull Container Images',
+    'Pulls the latest container images for all configured harnesses from the image registry.',
+    'operation',
+    'pending'
+);
+
+INSERT INTO maintenance_operations (id, key, title, description, category, status)
+VALUES (
+    lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' || hex(randomblob(6))),
+    'rebuild-server',
+    'Rebuild Server from Git',
+    'Pulls latest code from the repository, rebuilds the server binary and web assets, then restarts the hub service. Equivalent to the fast-deploy mode of gce-start-hub.sh.',
+    'operation',
+    'pending'
+);
+
+INSERT INTO maintenance_operations (id, key, title, description, category, status)
+VALUES (
+    lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' || hex(randomblob(6))),
+    'rebuild-web',
+    'Rebuild Web Frontend',
+    'Rebuilds only the web frontend assets from source without restarting the server binary. Changes take effect on the next page load.',
+    'operation',
+    'pending'
+);
+`
+
+const migrationV42 = `
+CREATE TABLE IF NOT EXISTS grove_sync_state (
+	grove_id TEXT NOT NULL,
+	broker_id TEXT NOT NULL DEFAULT '',
+	last_sync_time TIMESTAMP,
+	last_commit_sha TEXT,
+	file_count INTEGER NOT NULL DEFAULT 0,
+	total_bytes INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (grove_id, broker_id),
+	FOREIGN KEY (grove_id) REFERENCES groves(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_grove_sync_state_grove ON grove_sync_state(grove_id);
 `
 
 // Helper functions for JSON marshaling/unmarshaling

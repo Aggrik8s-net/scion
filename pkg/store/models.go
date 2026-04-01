@@ -692,10 +692,10 @@ const (
 	ScopeRuntimeBroker = "runtime_broker"
 )
 
-// ScopeIDHub is the well-known scope ID for hub-scoped env vars and secrets.
-// Since there is exactly one hub, this constant is used as a fixed sentinel
-// (analogous to how user scope uses the user's ID).
-const ScopeIDHub = "hub"
+// ScopeIDHub was previously a fixed sentinel "hub". It is now the hub's
+// instance ID, resolved at startup from config or hostname hash.
+// All call sites must pass the resolved hub ID instead of this constant.
+// Removed to force compile-time breakage at all callers.
 
 // InjectionMode constants for environment variables.
 const (
@@ -1253,4 +1253,64 @@ type GitIdentityConfig struct {
 	Name string `json:"name,omitempty"`
 	// Email is the git author/committer email (used when mode is "custom").
 	Email string `json:"email,omitempty"`
+}
+
+// =============================================================================
+// Maintenance Operations (Admin Maintenance Panel)
+// =============================================================================
+
+// MaintenanceOperation represents a registered maintenance operation or migration.
+type MaintenanceOperation struct {
+	ID          string     `json:"id"`
+	Key         string     `json:"key"`
+	Title       string     `json:"title"`
+	Description string     `json:"description"`
+	Category    string     `json:"category"` // "migration" or "operation"
+	Status      string     `json:"status"`   // pending, running, completed, failed
+	CreatedAt   time.Time  `json:"createdAt"`
+	StartedAt   *time.Time `json:"startedAt,omitempty"`
+	CompletedAt *time.Time `json:"completedAt,omitempty"`
+	StartedBy   string     `json:"startedBy,omitempty"`
+	Result      string     `json:"result,omitempty"`
+	Metadata    string     `json:"metadata,omitempty"`
+}
+
+// MaintenanceOperationRun represents a single execution of a repeatable operation.
+type MaintenanceOperationRun struct {
+	ID           string     `json:"id"`
+	OperationKey string     `json:"operationKey"`
+	Status       string     `json:"status"` // running, completed, failed
+	StartedAt    time.Time  `json:"startedAt"`
+	CompletedAt  *time.Time `json:"completedAt,omitempty"`
+	StartedBy    string     `json:"startedBy,omitempty"`
+	Result       string     `json:"result,omitempty"`
+	Log          string     `json:"log,omitempty"`
+}
+
+// Maintenance operation category constants.
+const (
+	MaintenanceCategoryMigration = "migration"
+	MaintenanceCategoryOperation = "operation"
+)
+
+// Maintenance operation status constants.
+const (
+	MaintenanceStatusPending   = "pending"
+	MaintenanceStatusRunning   = "running"
+	MaintenanceStatusCompleted = "completed"
+	MaintenanceStatusFailed    = "failed"
+)
+
+// =============================================================================
+// Grove Sync State (Workspace Sync Metadata)
+// =============================================================================
+
+// GroveSyncState tracks sync metadata per grove (and optionally per broker).
+type GroveSyncState struct {
+	GroveID       string     `json:"groveId"`
+	BrokerID      string     `json:"brokerId,omitempty"`
+	LastSyncTime  *time.Time `json:"lastSyncTime,omitempty"`
+	LastCommitSHA string     `json:"lastCommitSha,omitempty"`
+	FileCount     int        `json:"fileCount"`
+	TotalBytes    int64      `json:"totalBytes"`
 }

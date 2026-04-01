@@ -18,7 +18,9 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -113,6 +115,34 @@ type ServerConfig struct {
 	MaxSubscriptionsPerUser int
 	// GitHubAppConfig holds the GitHub App configuration for agent git authentication.
 	GitHubAppConfig GitHubAppServerConfig
+	// HubID is the unique hub instance ID used for secret namespacing.
+	// If empty, secrets are looked up/stored with an empty scope ID.
+	HubID string
+	// SecretBackend is the optional secret backend for signing key storage.
+	// When set before New(), ensureSigningKey can load/persist keys through the
+	// production secret backend (e.g., GCP Secret Manager) instead of relying
+	// solely on the SQLite store.
+	SecretBackend secret.SecretBackend
+	// MaintenanceConfig holds configuration for routine maintenance operations.
+	MaintenanceConfig MaintenanceConfig
+}
+
+// MaintenanceConfig holds configuration for routine maintenance operation executors.
+type MaintenanceConfig struct {
+	// ImageRegistry is the container image registry prefix (e.g., "ghcr.io/myorg").
+	ImageRegistry string
+	// ImageTag is the default image tag to pull (default: "latest").
+	ImageTag string
+	// Harnesses is the list of harness names whose images should be pulled (e.g., ["claude", "gemini"]).
+	Harnesses []string
+	// RuntimeBin overrides auto-detection of the container runtime binary (docker, podman).
+	RuntimeBin string
+	// RepoPath is the path to the scion source checkout for rebuild operations.
+	RepoPath string
+	// BinaryDest is the install path for the rebuilt binary (default: /usr/local/bin/scion).
+	BinaryDest string
+	// ServiceName is the systemd service name to restart (default: "scion-hub").
+	ServiceName string
 }
 
 // GitHubAppServerConfig holds the GitHub App configuration for the Hub server.
@@ -440,6 +470,7 @@ type Server struct {
 	events                 EventPublisher          // Event publisher for real-time SSE updates
 	notificationDispatcher *NotificationDispatcher // Notification dispatcher for agent status events
 	maintenance            *MaintenanceState       // Runtime maintenance mode state
+	hubID                  string                  // Unique hub instance ID for secret namespacing
 	embeddedBrokerID       string                  // Broker ID when running in hub+broker combo mode
 	scheduler              *Scheduler              // Unified scheduler for recurring tasks
 	cleanupOnce            sync.Once               // Ensures CleanupResources runs only once
@@ -497,6 +528,7 @@ func New(cfg ServerConfig, s store.Store) *Server {
 		startTime:   time.Now(),
 		events:      noopEventPublisher{},
 		maintenance: NewMaintenanceState(cfg.AdminMode, cfg.MaintenanceMessage),
+		hubID:       cfg.HubID,
 
 		// Subsystem loggers
 		agentLifecycleLog: logging.Subsystem("hub.agent-lifecycle"),
@@ -505,6 +537,12 @@ func New(cfg ServerConfig, s store.Store) *Server {
 		envSecretLog:      logging.Subsystem("hub.env-secrets"),
 		templateLog:       logging.Subsystem("hub.templates"),
 		workspaceLog:      logging.Subsystem("hub.workspace"),
+	}
+
+	// Set secret backend from config so ensureSigningKey can use it.
+	// This must happen before signing key initialization below.
+	if cfg.SecretBackend != nil {
+		srv.secretBackend = cfg.SecretBackend
 	}
 
 	// Initialize user activity tracker (throttled to once per hour per user)
@@ -519,24 +557,32 @@ func New(cfg ServerConfig, s store.Store) *Server {
 	agentKey, err := srv.ensureSigningKey(ctx, SecretKeyAgentSigningKey, cfg.AgentTokenConfig.SigningKey)
 	if err == nil {
 		cfg.AgentTokenConfig.SigningKey = agentKey
+	} else {
+		logSigningKeyFailure("agent", err, srv.secretBackend != nil)
 	}
 	tokenService, err := NewAgentTokenService(cfg.AgentTokenConfig)
 	if err != nil {
 		slog.Warn("Failed to initialize agent token service", "error", err)
 	} else {
 		srv.agentTokenService = tokenService
+		fp := sha256.Sum256(tokenService.config.SigningKey)
+		slog.Info("Agent token service initialized", "key_fingerprint", hex.EncodeToString(fp[:8]))
 	}
 
 	// Initialize user token service
 	userKey, err := srv.ensureSigningKey(ctx, SecretKeyUserSigningKey, cfg.UserTokenConfig.SigningKey)
 	if err == nil {
 		cfg.UserTokenConfig.SigningKey = userKey
+	} else {
+		logSigningKeyFailure("user", err, srv.secretBackend != nil)
 	}
 	userTokenService, err := NewUserTokenService(cfg.UserTokenConfig)
 	if err != nil {
 		slog.Warn("Failed to initialize user token service", "error", err)
 	} else {
 		srv.userTokenService = userTokenService
+		fp := sha256.Sum256(userTokenService.config.SigningKey)
+		slog.Info("User token service initialized", "key_fingerprint", hex.EncodeToString(fp[:8]))
 	}
 
 	// Initialize user access token service
@@ -663,9 +709,11 @@ func (s *Server) ensureSigningKey(ctx context.Context, keyName string, existingK
 		return existingKey, nil
 	}
 
+	hubID := s.hubID
+
 	// Try to load from the secret backend if configured
 	if s.secretBackend != nil {
-		sv, err := s.secretBackend.Get(ctx, keyName, store.ScopeHub, "hub")
+		sv, err := s.secretBackend.Get(ctx, keyName, store.ScopeHub, hubID)
 		if err == nil {
 			slog.Info("Loaded existing signing key from secret backend", "key", keyName)
 			return base64.StdEncoding.DecodeString(sv.Value)
@@ -676,13 +724,64 @@ func (s *Server) ensureSigningKey(ctx context.Context, keyName string, existingK
 	}
 
 	// Fallback: try loading from the store directly (for migration/local dev)
-	val, err := s.store.GetSecretValue(ctx, keyName, store.ScopeHub, "hub")
+	val, err := s.store.GetSecretValue(ctx, keyName, store.ScopeHub, hubID)
 	if err == nil {
 		slog.Info("Loaded existing signing key from store", "key", keyName)
-		return base64.StdEncoding.DecodeString(val)
+		key, decErr := base64.StdEncoding.DecodeString(val)
+		if decErr != nil {
+			return nil, fmt.Errorf("failed to decode signing key %s from store: %w", keyName, decErr)
+		}
+		// Sync to secret backend so future restarts load from the authoritative source.
+		if s.secretBackend != nil {
+			input := &secret.SetSecretInput{
+				Name:        keyName,
+				Value:       val,
+				Scope:       store.ScopeHub,
+				ScopeID:     hubID,
+				Description: fmt.Sprintf("Hub signing key for %s (synced from store)", keyName),
+			}
+			if _, _, syncErr := s.secretBackend.Set(ctx, input); syncErr == nil {
+				slog.Info("Synced signing key from store to secret backend", "key", keyName)
+			} else {
+				slog.Warn("Failed to sync signing key to secret backend", "key", keyName, "error", syncErr)
+			}
+		}
+		return key, nil
 	}
 	if err != store.ErrNotFound {
 		return nil, fmt.Errorf("failed to load signing key %s from store: %w", keyName, err)
+	}
+
+	// Migration fallback: try legacy scope IDs used before hub-instance-ID namespacing.
+	// Keys may exist under ScopeID="hub" (pre-refactor) or ScopeID="" (window between
+	// the refactor and the fix that passes HubID into ServerConfig).
+	if hubID != "" {
+		for _, legacyScopeID := range []string{"hub", ""} {
+			if legacyScopeID == hubID {
+				continue
+			}
+			val, legacyErr := s.store.GetSecretValue(ctx, keyName, store.ScopeHub, legacyScopeID)
+			if legacyErr != nil {
+				continue
+			}
+			slog.Info("Loaded signing key from legacy scope ID, will migrate", "key", keyName, "legacyScopeID", legacyScopeID)
+			key, decErr := base64.StdEncoding.DecodeString(val)
+			if decErr != nil {
+				return nil, fmt.Errorf("failed to decode legacy signing key %s: %w", keyName, decErr)
+			}
+			// Delete the old record first — it may share the same primary key ID
+			// so an INSERT with the new scope_id would collide on the PK.
+			if delErr := s.store.DeleteSecret(ctx, keyName, store.ScopeHub, legacyScopeID); delErr != nil {
+				slog.Warn("Failed to delete legacy signing key record", "key", keyName, "legacyScopeID", legacyScopeID, "error", delErr)
+			}
+			// Re-save under the current hub ID so lookups and listings find it
+			if err := s.persistSigningKey(ctx, keyName, val, hubID); err != nil {
+				slog.Warn("Failed to migrate signing key to new hub ID", "key", keyName, "error", err)
+			} else {
+				slog.Info("Migrated signing key to new hub ID scope", "key", keyName, "hubID", hubID)
+			}
+			return key, nil
+		}
 	}
 
 	// Not found anywhere, generate a new one
@@ -699,7 +798,7 @@ func (s *Server) ensureSigningKey(ctx context.Context, keyName string, existingK
 			Name:        keyName,
 			Value:       encodedKey,
 			Scope:       store.ScopeHub,
-			ScopeID:     "hub",
+			ScopeID:     hubID,
 			Description: fmt.Sprintf("Hub signing key for %s", keyName),
 		}
 		if _, _, err := s.secretBackend.Set(ctx, input); err == nil {
@@ -711,21 +810,48 @@ func (s *Server) ensureSigningKey(ctx context.Context, keyName string, existingK
 	}
 
 	// Fallback: save directly to the store (hub-internal key, acceptable for local dev)
-	sec := &store.Secret{
-		ID:             fmt.Sprintf("hub-%s", keyName),
-		Key:            keyName,
-		EncryptedValue: encodedKey,
-		Scope:          store.ScopeHub,
-		ScopeID:        "hub",
-		Description:    fmt.Sprintf("Hub signing key for %s", keyName),
-	}
-	if _, err := s.store.UpsertSecret(ctx, sec); err != nil {
+	if err := s.persistSigningKey(ctx, keyName, encodedKey, hubID); err != nil {
 		slog.Warn("Failed to persist signing key", "key", keyName, "error", err)
 	} else {
 		slog.Info("Persisted new signing key to store", "key", keyName)
 	}
 
 	return newKey, nil
+}
+
+// logSigningKeyFailure logs a signing key loading failure at the appropriate level.
+// When a secret backend is configured (production), this is an ERROR because
+// ephemeral keys will invalidate all tokens on the next restart.
+func logSigningKeyFailure(keyType string, err error, hasSecretBackend bool) {
+	if hasSecretBackend {
+		slog.Error("Failed to load signing key — using ephemeral key that will NOT survive restart",
+			"key_type", keyType, "error", err)
+	} else {
+		slog.Warn("Failed to load signing key, will use ephemeral key", "key_type", keyType, "error", err)
+	}
+}
+
+// persistSigningKey saves a signing key to the store with an ID scoped to the hub instance.
+func (s *Server) persistSigningKey(ctx context.Context, keyName, encodedValue, hubID string) error {
+	sec := &store.Secret{
+		ID:             signingKeySecretID(keyName, hubID),
+		Key:            keyName,
+		EncryptedValue: encodedValue,
+		Scope:          store.ScopeHub,
+		ScopeID:        hubID,
+		Description:    fmt.Sprintf("Hub signing key for %s", keyName),
+	}
+	_, err := s.store.UpsertSecret(ctx, sec)
+	return err
+}
+
+// signingKeySecretID returns a deterministic primary key for a signing key record,
+// scoped to the hub instance to avoid PK collisions during migration.
+func signingKeySecretID(keyName, hubID string) string {
+	if hubID == "" {
+		return fmt.Sprintf("hub-%s", keyName)
+	}
+	return fmt.Sprintf("hub-%s-%s", hubID, keyName)
 }
 
 // SetDispatcher sets the agent dispatcher for co-located runtime broker operations.
@@ -822,6 +948,20 @@ func (s *Server) GetStorage() storage.Storage {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.storage
+}
+
+// SetHubID sets the unique hub instance ID for secret namespacing.
+func (s *Server) SetHubID(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hubID = id
+}
+
+// HubID returns the hub instance ID. Thread-safe.
+func (s *Server) HubID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.hubID
 }
 
 // SetSecretBackend sets the secret backend for pluggable secret storage.
@@ -1019,7 +1159,8 @@ func (s *Server) CreateAuthenticatedDispatcher() *HTTPAgentDispatcher {
 		slog.Info("Configure via: hub.endpoint in server.yaml or SCION_SERVER_HUB_ENDPOINT env var")
 	}
 
-	// Pass secret backend to dispatcher if configured
+	// Pass hub ID and secret backend to dispatcher if configured
+	dispatcher.SetHubID(s.hubID)
 	if s.secretBackend != nil {
 		dispatcher.SetSecretBackend(s.secretBackend)
 	}
@@ -1698,6 +1839,9 @@ func (s *Server) registerRoutes() {
 
 	// Admin system endpoints
 	s.mux.HandleFunc("/api/v1/admin/maintenance", s.handleAdminMaintenance)
+	s.mux.HandleFunc("/api/v1/admin/maintenance/operations", s.handleAdminMaintenanceOps)
+	s.mux.HandleFunc("/api/v1/admin/maintenance/operations/", s.handleAdminMaintenanceOps)
+	s.mux.HandleFunc("/api/v1/admin/maintenance/migrations/", s.handleAdminMaintenanceMigrations)
 	s.mux.HandleFunc("/api/v1/admin/scheduler", s.handleAdminScheduler)
 	s.mux.HandleFunc("/api/v1/admin/server-config", s.handleAdminServerConfig)
 

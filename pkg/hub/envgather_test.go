@@ -704,7 +704,7 @@ func TestEnvGather_BuildResponse_SecretScope(t *testing.T) {
 	}
 
 	// Set up the secret backend on the server
-	backend := secret.NewLocalBackend(st)
+	backend := secret.NewLocalBackend(st, "test-hub-id")
 	srv.SetSecretBackend(backend)
 
 	agent := &store.Agent{
@@ -1356,7 +1356,7 @@ func TestGroveRoute_ResolvesUserScopedSecrets(t *testing.T) {
 	}
 
 	// Store a user-scoped secret for the dev-user
-	backend := secret.NewLocalBackend(st)
+	backend := secret.NewLocalBackend(st, "test-hub-id")
 	_, _, err := backend.Set(ctx, &secret.SetSecretInput{
 		Name:       "GEMINI_API_KEY",
 		Value:      "secret-gemini-key",

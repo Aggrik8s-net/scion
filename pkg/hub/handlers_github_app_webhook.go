@@ -667,23 +667,29 @@ func (s *Server) getGitHubAppClient() (*githubapp.Client, error) {
 	}
 
 	var keyData []byte
+	var keySource string
 	var err error
 
 	if cfg.PrivateKey != "" {
 		keyData = []byte(cfg.PrivateKey)
+		keySource = "in-memory config"
 	} else if cfg.PrivateKeyPath != "" {
 		keyData, err = os.ReadFile(cfg.PrivateKeyPath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read private key file: %w", err)
+			return nil, fmt.Errorf("failed to read private key file %q: %w", cfg.PrivateKeyPath, err)
 		}
+		keySource = "file:" + cfg.PrivateKeyPath
 	} else {
 		// Try loading from secrets backend
 		keyStr, secretErr := s.loadGitHubAppSecret(context.Background(), GitHubAppSecretPrivateKey)
 		if secretErr != nil || keyStr == "" {
-			return nil, fmt.Errorf("github app not configured: missing private key")
+			return nil, fmt.Errorf("github app not configured: no private key found (checked in-memory config, file path, and secrets backend)")
 		}
 		keyData = []byte(keyStr)
+		keySource = "secrets backend"
 	}
+
+	slog.Debug("Loading GitHub App private key", "app_id", cfg.AppID, "key_source", keySource, "key_bytes", len(keyData))
 
 	return githubapp.NewClient(githubapp.Config{
 		AppID:      cfg.AppID,
@@ -702,8 +708,16 @@ func (s *Server) mintGitHubAppToken(ctx context.Context, grove *store.Grove) (st
 
 	client, err := s.getGitHubAppClient()
 	if err != nil {
+		// Classify the client-creation error: it could be a missing app_id,
+		// a missing/corrupt private key, or a file-read failure.
+		errorCode := githubapp.ErrCodeTokenMintFailed
+		if mintErr, ok := err.(*githubapp.TokenMintError); ok {
+			errorCode = mintErr.ErrorCode
+		} else if strings.Contains(err.Error(), "private key") || strings.Contains(err.Error(), "PEM") {
+			errorCode = githubapp.ErrCodePrivateKeyInvalid
+		}
 		s.updateGroveGitHubAppStatus(ctx, grove, store.GitHubAppStateError,
-			githubapp.ErrCodePrivateKeyInvalid, err.Error())
+			errorCode, err.Error())
 		return "", "", err
 	}
 

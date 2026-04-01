@@ -34,6 +34,7 @@ var (
 	migrateCredentials string
 	migrateDryRun      bool
 	migrateForce       bool
+	migrateHubID       string
 )
 
 var hubSecretMigrateCmd = &cobra.Command{
@@ -69,6 +70,7 @@ func init() {
 	hubSecretMigrateCmd.Flags().StringVar(&migrateCredentials, "credentials", "", "Path to GCP credentials JSON file")
 	hubSecretMigrateCmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Show what would be migrated without making changes")
 	hubSecretMigrateCmd.Flags().BoolVar(&migrateForce, "force", false, "Re-migrate secrets that already have a GCP SM reference")
+	hubSecretMigrateCmd.Flags().StringVar(&migrateHubID, "hub-id", "", "Hub instance ID for secret namespacing (defaults to sha256(hostname)[:12])")
 
 	_ = hubSecretMigrateCmd.MarkFlagRequired("project")
 }
@@ -106,11 +108,18 @@ func runSecretMigrate(cmd *cobra.Command, args []string) error {
 		credentialsJSON = string(data)
 	}
 
+	// Resolve hub ID for secret namespacing
+	hubID := migrateHubID
+	if hubID == "" {
+		hubID = config.DefaultHubID()
+	}
+	log.Printf("Using hub ID: %s", hubID)
+
 	// Create GCP backend
 	gcpBackend, err := secret.NewGCPBackend(ctx, db, secret.GCPBackendConfig{
 		ProjectID:       migrateProject,
 		CredentialsJSON: credentialsJSON,
-	})
+	}, hubID)
 	if err != nil {
 		return fmt.Errorf("failed to create GCP backend: %w", err)
 	}

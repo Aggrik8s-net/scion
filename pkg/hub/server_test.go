@@ -18,9 +18,13 @@ package hub
 
 import (
 	"context"
+	"encoding/base64"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/GoogleCloudPlatform/scion/pkg/secret"
+	"github.com/GoogleCloudPlatform/scion/pkg/store"
 	"github.com/GoogleCloudPlatform/scion/pkg/store/sqlite"
 )
 
@@ -69,6 +73,315 @@ func TestServer_PersistentSigningKeys(t *testing.T) {
 	}
 	if string(userKey1) != string(userKey2) {
 		t.Errorf("user signing keys do not match: %x != %x", userKey1, userKey2)
+	}
+}
+
+func TestServer_PersistentSigningKeys_WithHubID(t *testing.T) {
+	s, err := sqlite.New(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+	if err := s.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate test store: %v", err)
+	}
+
+	cfg := DefaultServerConfig()
+	cfg.HubID = "test-hub-123"
+
+	srv1 := New(cfg, s)
+	t.Cleanup(func() { srv1.Shutdown(context.Background()) })
+	if srv1.agentTokenService == nil {
+		t.Fatal("agentTokenService not initialized")
+	}
+
+	key1 := srv1.agentTokenService.config.SigningKey
+	userKey1 := srv1.userTokenService.config.SigningKey
+
+	// Second server with same hubID should get the same keys
+	srv2 := New(cfg, s)
+	t.Cleanup(func() { srv2.Shutdown(context.Background()) })
+
+	if string(key1) != string(srv2.agentTokenService.config.SigningKey) {
+		t.Error("agent signing keys should match with same hubID")
+	}
+	if string(userKey1) != string(srv2.userTokenService.config.SigningKey) {
+		t.Error("user signing keys should match with same hubID")
+	}
+
+	// Signing keys should be visible when listing hub-scoped secrets
+	ctx := context.Background()
+	listed, err := s.ListSecrets(ctx, store.SecretFilter{Scope: store.ScopeHub, ScopeID: "test-hub-123"})
+	if err != nil {
+		t.Fatalf("ListSecrets failed: %v", err)
+	}
+	foundKeys := map[string]bool{}
+	for _, sec := range listed {
+		foundKeys[sec.Key] = true
+	}
+	if !foundKeys[SecretKeyAgentSigningKey] {
+		t.Error("agent_signing_key should appear in hub secret list")
+	}
+	if !foundKeys[SecretKeyUserSigningKey] {
+		t.Error("user_signing_key should appear in hub secret list")
+	}
+}
+
+func TestServer_UserTokenSurvivesRestart(t *testing.T) {
+	// Simulate the exact production scenario: sign in, restart server, validate token.
+	// Uses a file-based SQLite DB to match production behavior.
+	dbPath := filepath.Join(t.TempDir(), "test-hub.db")
+	s, err := sqlite.New(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+	if err := s.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate test store: %v", err)
+	}
+
+	cfg := DefaultServerConfig()
+	cfg.HubID = "test-hub-456"
+
+	// Run 1: create server, generate a user token
+	srv1 := New(cfg, s)
+	t.Cleanup(func() { srv1.Shutdown(context.Background()) })
+	if srv1.userTokenService == nil {
+		t.Fatal("userTokenService not initialized")
+	}
+
+	accessToken, _, _, err := srv1.userTokenService.GenerateTokenPair(
+		"user-1", "test@example.com", "Test User", store.UserRoleAdmin, ClientTypeWeb,
+	)
+	if err != nil {
+		t.Fatalf("GenerateTokenPair failed: %v", err)
+	}
+
+	// Verify it works on the same server
+	if _, err := srv1.userTokenService.ValidateUserToken(accessToken); err != nil {
+		t.Fatalf("Token should validate on same server: %v", err)
+	}
+
+	key1 := srv1.userTokenService.config.SigningKey
+
+	// Close the store and reopen from the same file (simulates process restart)
+	s.Close()
+	s2, err := sqlite.New(dbPath)
+	if err != nil {
+		t.Fatalf("failed to reopen test store: %v", err)
+	}
+	if err := s2.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate reopened store: %v", err)
+	}
+
+	// Run 2: create a NEW server with the reopened store
+	srv2 := New(cfg, s2)
+	t.Cleanup(func() { srv2.Shutdown(context.Background()) })
+	if srv2.userTokenService == nil {
+		t.Fatal("userTokenService not initialized on srv2")
+	}
+
+	key2 := srv2.userTokenService.config.SigningKey
+
+	// Verify keys match
+	if string(key1) != string(key2) {
+		t.Errorf("signing keys differ after restart: key1=%x key2=%x", key1[:8], key2[:8])
+	}
+
+	// The token from Run 1 must validate on Run 2
+	claims, err := srv2.userTokenService.ValidateUserToken(accessToken)
+	if err != nil {
+		t.Fatalf("Token from Run 1 should validate after restart: %v", err)
+	}
+	if claims.Email != "test@example.com" {
+		t.Errorf("expected email test@example.com, got %s", claims.Email)
+	}
+}
+
+func TestServer_SigningKeyMigration_LegacyHubScopeID(t *testing.T) {
+	// Simulate the pre-hubID-namespacing scenario where keys were stored
+	// with ScopeID="hub". A new server with a real hubID should find them
+	// via the migration fallback.
+	s, err := sqlite.New(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+	if err := s.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate test store: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Directly insert legacy keys with ScopeID="hub" (simulating pre-refactor storage)
+	legacyAgentKey := make([]byte, 32)
+	legacyUserKey := make([]byte, 32)
+	copy(legacyAgentKey, []byte("test-agent-key-1234567890123456"))
+	copy(legacyUserKey, []byte("test-user-key-12345678901234567"))
+	agentEncoded := base64.StdEncoding.EncodeToString(legacyAgentKey)
+	userEncoded := base64.StdEncoding.EncodeToString(legacyUserKey)
+
+	if err := s.CreateSecret(ctx, &store.Secret{
+		ID: "hub-agent_signing_key", Key: SecretKeyAgentSigningKey,
+		EncryptedValue: agentEncoded, Scope: store.ScopeHub, ScopeID: "hub",
+		Description: "Hub signing key for agent_signing_key",
+	}); err != nil {
+		t.Fatalf("failed to create legacy agent key: %v", err)
+	}
+	if err := s.CreateSecret(ctx, &store.Secret{
+		ID: "hub-user_signing_key", Key: SecretKeyUserSigningKey,
+		EncryptedValue: userEncoded, Scope: store.ScopeHub, ScopeID: "hub",
+		Description: "Hub signing key for user_signing_key",
+	}); err != nil {
+		t.Fatalf("failed to create legacy user key: %v", err)
+	}
+
+	// Now create a server with an actual hubID — it should migrate from "hub"
+	cfg := DefaultServerConfig()
+	cfg.HubID = "my-new-hub-id"
+	srv := New(cfg, s)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
+
+	if string(legacyAgentKey) != string(srv.agentTokenService.config.SigningKey) {
+		t.Error("agent signing key should be migrated from legacy 'hub' scope")
+	}
+	if string(legacyUserKey) != string(srv.userTokenService.config.SigningKey) {
+		t.Error("user signing key should be migrated from legacy 'hub' scope")
+	}
+
+	// Verify the migrated keys are findable via ListSecrets with the new hub ID.
+	// This is what the admin UI and CLI use to display hub-scoped secrets.
+	listed, err := s.ListSecrets(ctx, store.SecretFilter{Scope: store.ScopeHub, ScopeID: "my-new-hub-id"})
+	if err != nil {
+		t.Fatalf("ListSecrets failed: %v", err)
+	}
+	foundKeys := map[string]bool{}
+	for _, sec := range listed {
+		foundKeys[sec.Key] = true
+	}
+	if !foundKeys[SecretKeyAgentSigningKey] {
+		t.Error("agent_signing_key should be listed under new hub ID after migration")
+	}
+	if !foundKeys[SecretKeyUserSigningKey] {
+		t.Error("user_signing_key should be listed under new hub ID after migration")
+	}
+
+	// Verify the old legacy records are cleaned up
+	oldSecrets, err := s.ListSecrets(ctx, store.SecretFilter{Scope: store.ScopeHub, ScopeID: "hub"})
+	if err != nil {
+		t.Fatalf("ListSecrets (legacy) failed: %v", err)
+	}
+	for _, sec := range oldSecrets {
+		if sec.Key == SecretKeyAgentSigningKey || sec.Key == SecretKeyUserSigningKey {
+			t.Errorf("legacy record for %s should have been deleted during migration", sec.Key)
+		}
+	}
+}
+
+func TestServer_SigningKeyBootstrapWithSecretBackend(t *testing.T) {
+	// Verify that when SecretBackend is set in ServerConfig, signing keys
+	// are loaded through it and synced from SQLite to the backend.
+	s, err := sqlite.New(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+	if err := s.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate test store: %v", err)
+	}
+
+	hubID := "test-backend-hub"
+	backend := secret.NewLocalBackend(s, hubID)
+
+	cfg := DefaultServerConfig()
+	cfg.HubID = hubID
+	cfg.SecretBackend = backend
+
+	// Run 1: keys generated and stored
+	srv1 := New(cfg, s)
+	t.Cleanup(func() { srv1.Shutdown(context.Background()) })
+	if srv1.userTokenService == nil {
+		t.Fatal("userTokenService not initialized")
+	}
+
+	key1 := srv1.userTokenService.config.SigningKey
+
+	// Generate a token with this key
+	accessToken, _, _, err := srv1.userTokenService.GenerateTokenPair(
+		"user-1", "test@example.com", "Test", store.UserRoleAdmin, ClientTypeWeb,
+	)
+	if err != nil {
+		t.Fatalf("GenerateTokenPair failed: %v", err)
+	}
+
+	// Verify key is available through the secret backend
+	ctx := context.Background()
+	sv, err := backend.Get(ctx, SecretKeyUserSigningKey, store.ScopeHub, hubID)
+	if err != nil {
+		t.Fatalf("Signing key should be in secret backend after first run: %v", err)
+	}
+	if sv.Value == "" {
+		t.Fatal("Signing key value in backend should not be empty")
+	}
+
+	// Run 2: create new server — key should be loaded from backend
+	srv2 := New(cfg, s)
+	t.Cleanup(func() { srv2.Shutdown(context.Background()) })
+
+	key2 := srv2.userTokenService.config.SigningKey
+	if string(key1) != string(key2) {
+		t.Errorf("signing keys should match across restarts: key1=%x key2=%x", key1[:8], key2[:8])
+	}
+
+	// Token from Run 1 must validate on Run 2
+	claims, err := srv2.userTokenService.ValidateUserToken(accessToken)
+	if err != nil {
+		t.Fatalf("Token from Run 1 should validate after restart with backend: %v", err)
+	}
+	if claims.Email != "test@example.com" {
+		t.Errorf("expected email test@example.com, got %s", claims.Email)
+	}
+}
+
+func TestServer_SigningKeySyncFromStoreToBackend(t *testing.T) {
+	// Verify that keys pre-existing in SQLite are synced to the secret backend
+	// when the backend is newly configured (migration from no-backend to backend).
+	s, err := sqlite.New(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+	if err := s.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate test store: %v", err)
+	}
+
+	hubID := "test-sync-hub"
+
+	// Run 1: No secret backend — keys go to SQLite only
+	cfg := DefaultServerConfig()
+	cfg.HubID = hubID
+	srv1 := New(cfg, s)
+	t.Cleanup(func() { srv1.Shutdown(context.Background()) })
+	key1 := srv1.userTokenService.config.SigningKey
+
+	// Run 2: Secret backend configured — keys should sync from SQLite to backend
+	backend := secret.NewLocalBackend(s, hubID)
+	cfg.SecretBackend = backend
+	srv2 := New(cfg, s)
+	t.Cleanup(func() { srv2.Shutdown(context.Background()) })
+	key2 := srv2.userTokenService.config.SigningKey
+
+	if string(key1) != string(key2) {
+		t.Errorf("keys should match after adding backend: key1=%x key2=%x", key1[:8], key2[:8])
+	}
+
+	// Verify the key is now in the backend
+	ctx := context.Background()
+	sv, err := backend.Get(ctx, SecretKeyUserSigningKey, store.ScopeHub, hubID)
+	if err != nil {
+		t.Fatalf("Signing key should be synced to backend: %v", err)
+	}
+	decodedKey, err := base64.StdEncoding.DecodeString(sv.Value)
+	if err != nil {
+		t.Fatalf("Failed to decode synced key: %v", err)
+	}
+	if string(decodedKey) != string(key1) {
+		t.Error("Synced key value should match original SQLite key")
 	}
 }
 

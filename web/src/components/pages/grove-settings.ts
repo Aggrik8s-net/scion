@@ -1303,7 +1303,7 @@ export class ScionPageGroveSettings extends LitElement {
 
           ${status?.state === 'error' || status?.state === 'degraded' ? html`
             <div class="status-message ${status.state === 'error' ? 'error' : 'warning'}">
-              <strong>${status.error_code}:</strong> ${status.error_message}
+              <strong>${this.formatGitHubErrorCode(status.error_code)}:</strong> ${status.error_message}
               ${status.state === 'error' && this.grove?.gitRemote ? html`
                 <br><small>Agents will use PAT fallback if available.</small>
               ` : ''}
@@ -1351,6 +1351,19 @@ export class ScionPageGroveSettings extends LitElement {
         ${label}: ${value}
       </span>
     `;
+  }
+
+  private formatGitHubErrorCode(code?: string): string {
+    switch (code) {
+      case 'private_key_invalid': return 'Private Key Invalid';
+      case 'app_not_found': return 'App Not Found';
+      case 'installation_revoked': return 'Installation Revoked';
+      case 'installation_suspended': return 'Installation Suspended';
+      case 'repo_not_accessible': return 'Repository Not Accessible';
+      case 'permission_denied': return 'Permission Denied';
+      case 'token_mint_failed': return 'Token Mint Failed';
+      default: return code ?? 'Error';
+    }
   }
 
   private async checkGitHubStatus(): Promise<void> {

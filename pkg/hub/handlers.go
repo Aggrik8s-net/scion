@@ -31,6 +31,7 @@ import (
 	"github.com/GoogleCloudPlatform/scion/pkg/api"
 	"github.com/GoogleCloudPlatform/scion/pkg/config"
 	"github.com/GoogleCloudPlatform/scion/pkg/gcp"
+	"github.com/GoogleCloudPlatform/scion/pkg/hub/githubapp"
 	"github.com/GoogleCloudPlatform/scion/pkg/hubclient"
 	"github.com/GoogleCloudPlatform/scion/pkg/messages"
 	"github.com/GoogleCloudPlatform/scion/pkg/secret"
@@ -1838,13 +1839,31 @@ func (s *Server) handleAgentGitHubTokenRefresh(w http.ResponseWriter, r *http.Re
 
 	token, expiry, err := s.MintGitHubAppTokenForGrove(ctx, grove)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, ErrCodeInternalError,
+		// Classify the error to return an appropriate status code.
+		// Configuration errors (bad key, wrong app_id) are 502 (upstream auth failed),
+		// not 500 (our server is broken).
+		statusCode := http.StatusBadGateway
+		errCode := ErrCodeRuntimeError
+		if mintErr, ok := err.(*githubapp.TokenMintError); ok {
+			switch mintErr.ErrorCode {
+			case githubapp.ErrCodePrivateKeyInvalid, githubapp.ErrCodeAppNotFound:
+				statusCode = http.StatusBadGateway
+				errCode = ErrCodeRuntimeError
+			case githubapp.ErrCodeInstallationRevoked, githubapp.ErrCodeInstallationSuspended:
+				statusCode = http.StatusUnprocessableEntity
+				errCode = ErrCodeUnprocessable
+			case githubapp.ErrCodePermissionDenied, githubapp.ErrCodeRepoNotAccessible:
+				statusCode = http.StatusForbidden
+				errCode = ErrCodeForbidden
+			}
+		}
+		writeError(w, statusCode, errCode,
 			"failed to mint GitHub token: "+err.Error(), nil)
 		return
 	}
 
 	if token == "" {
-		writeError(w, http.StatusInternalServerError, ErrCodeInternalError,
+		writeError(w, http.StatusServiceUnavailable, ErrCodeUnavailable,
 			"GitHub App not configured on Hub", nil)
 		return
 	}
@@ -3622,6 +3641,34 @@ func (s *Server) handleGroveRoutes(w http.ResponseWriter, r *http.Request) {
 	// Check for nested /sync-templates path
 	if subPath == "sync-templates" {
 		s.handleGroveSyncTemplates(w, r, groveID)
+		return
+	}
+
+	// Check for nested /dav/ path (WebDAV endpoint for grove workspace sync)
+	if strings.HasPrefix(subPath, "dav") {
+		davPath := strings.TrimPrefix(subPath, "dav")
+		davPath = strings.TrimPrefix(davPath, "/")
+		s.handleGroveWebDAV(w, r, groveID, davPath)
+		return
+	}
+
+	// Check for nested /sync/status path (sync metadata)
+	if subPath == "sync/status" {
+		s.handleGroveSyncStatus(w, r, groveID)
+		return
+	}
+
+	// Check for nested /workspace/cache/ paths (linked grove cache management)
+	if subPath == "workspace/cache/refresh" {
+		s.handleGroveCacheRefresh(w, r, groveID)
+		return
+	}
+	if subPath == "workspace/cache/status" {
+		s.handleGroveCacheStatus(w, r, groveID)
+		return
+	}
+	if subPath == "workspace/cache/notify" {
+		s.handleGroveCacheNotify(w, r, groveID)
 		return
 	}
 
@@ -5700,7 +5747,7 @@ func (s *Server) resolveEnvSecretAccess(w http.ResponseWriter, r *http.Request, 
 			Forbidden(w)
 			return "", false
 		}
-		return store.ScopeIDHub, true
+		return s.hubID, true
 
 	default:
 		BadRequest(w, "invalid scope: "+scope)
@@ -6022,6 +6069,7 @@ func metaToStoreSecret(m secret.SecretMeta) store.Secret {
 	return store.Secret{
 		ID:            m.ID,
 		Key:           m.Name,
+		SecretRef:     m.SecretRef,
 		SecretType:    m.SecretType,
 		Target:        m.Target,
 		Scope:         m.Scope,
@@ -6076,15 +6124,6 @@ func (s *Server) listSecrets(w http.ResponseWriter, r *http.Request) {
 	scopeID, ok := s.resolveEnvSecretAccess(w, r, scope, query.Get("scopeId"), false)
 	if !ok {
 		return
-	}
-
-	// Admin users listing user-scoped secrets can see all users' secrets.
-	// This handles the dev-auth case where the dev user has a different ID
-	// than OAuth users who may have stored secrets via CLI.
-	if scope == store.ScopeUser {
-		if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil && userIdent.Role() == store.UserRoleAdmin {
-			scopeID = ""
-		}
 	}
 
 	metas, err := s.secretBackend.List(ctx, secret.Filter{

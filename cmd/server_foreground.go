@@ -207,8 +207,23 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 
 	// 11. Start Hub
 	var hubSrv *hub.Server
+	var secretBackend secret.SecretBackend
 	if enableHub {
-		hubSrv = initHubServer(ctx, cfg, s, hubEndpoint, devAuthToken, adminEmailList, adminMode, maintenanceMessage, requestLogger, messageLogger, globalDir, pluginMgr)
+		// Initialize secret backend early so signing keys can be loaded from it
+		// during hub server creation. This prevents the previous bug where
+		// ensureSigningKey always fell through to SQLite because the secret
+		// backend was set too late (after hub.New()).
+		hubID := cfg.Hub.ResolveHubID()
+		var sbErr error
+		secretBackend, sbErr = secret.NewBackend(ctx, cfg.Secrets.Backend, s, secret.GCPBackendConfig{
+			ProjectID:       cfg.Secrets.GCPProjectID,
+			CredentialsJSON: cfg.Secrets.GCPCredentials,
+		}, hubID)
+		if sbErr != nil {
+			log.Printf("Warning: failed to initialize secret backend: %v", sbErr)
+		}
+
+		hubSrv = initHubServer(ctx, cfg, s, hubEndpoint, devAuthToken, adminEmailList, adminMode, maintenanceMessage, requestLogger, messageLogger, globalDir, pluginMgr, secretBackend)
 
 		if !enableWeb {
 			// Hub runs its own HTTP server (standalone mode).
@@ -603,8 +618,9 @@ func parseAdminEmails(cfg *config.GlobalConfig) []string {
 }
 
 // initHubServer creates and configures the Hub server.
-func initHubServer(ctx context.Context, cfg *config.GlobalConfig, s store.Store, hubEndpoint, devAuthToken string, adminEmailList []string, adminMode bool, maintenanceMessage string, requestLogger, messageLogger *slog.Logger, globalDir string, pluginMgr *scionplugin.Manager) *hub.Server {
+func initHubServer(ctx context.Context, cfg *config.GlobalConfig, s store.Store, hubEndpoint, devAuthToken string, adminEmailList []string, adminMode bool, maintenanceMessage string, requestLogger, messageLogger *slog.Logger, globalDir string, pluginMgr *scionplugin.Manager, secretBackend secret.SecretBackend) *hub.Server {
 	hubCfg := hub.ServerConfig{
+		HubID:                 cfg.Hub.ResolveHubID(),
 		Port:                  cfg.Hub.Port,
 		Host:                  cfg.Hub.Host,
 		ReadTimeout:           cfg.Hub.ReadTimeout,
@@ -667,6 +683,8 @@ func initHubServer(ctx context.Context, cfg *config.GlobalConfig, s store.Store,
 				},
 			},
 		},
+		MaintenanceConfig: resolveMaintenanceConfig(cfg),
+		SecretBackend:     secretBackend,
 	}
 
 	hubSrv := hub.New(hubCfg, s)
@@ -721,15 +739,14 @@ func initHubServer(ctx context.Context, cfg *config.GlobalConfig, s store.Store,
 	// Initialize storage
 	initHubStorage(ctx, hubSrv, cfg, globalDir)
 
-	// Initialize secret backend
-	secretBackend, err := secret.NewBackend(ctx, cfg.Secrets.Backend, s, secret.GCPBackendConfig{
-		ProjectID:       cfg.Secrets.GCPProjectID,
-		CredentialsJSON: cfg.Secrets.GCPCredentials,
-	})
-	if err != nil {
-		log.Printf("Warning: failed to initialize secret backend: %v", err)
-	} else {
-		hubSrv.SetSecretBackend(secretBackend)
+	// Hub ID was already resolved and set during initHubServer via ServerConfig.HubID
+	hubID := hubSrv.HubID()
+	log.Printf("Hub instance ID: %s", hubID)
+
+	// Secret backend was initialized before hub.New() and passed via
+	// ServerConfig.SecretBackend so that signing keys are loaded from it
+	// during server creation. Log the configured backend here.
+	if secretBackend != nil {
 		log.Printf("Secret backend configured: %s", cfg.Secrets.Backend)
 	}
 
@@ -1176,4 +1193,47 @@ func resolveHubEndpointForBroker(cfg *config.GlobalConfig, hubEndpoint string, s
 		hubEndpointForRH = settings.Hub.Endpoint
 	}
 	return hubEndpointForRH
+}
+
+// resolveMaintenanceConfig builds the maintenance config from versioned settings
+// and environment variables.
+func resolveMaintenanceConfig(cfg *config.GlobalConfig) hub.MaintenanceConfig {
+	mc := hub.MaintenanceConfig{
+		ServiceName: "scion-hub",
+		BinaryDest:  "/usr/local/bin/scion",
+	}
+
+	// Pull from versioned settings if available.
+	if vs, err := config.LoadVersionedSettings(""); err == nil {
+		mc.ImageRegistry = vs.ResolveImageRegistry("")
+		// Collect harness names from configured harness configs.
+		for name := range vs.HarnessConfigs {
+			mc.Harnesses = append(mc.Harnesses, name)
+		}
+		if mc.RepoPath == "" {
+			mc.RepoPath = vs.WorkspacePath
+		}
+	}
+
+	// Environment variable overrides.
+	if v := os.Getenv("SCION_MAINTENANCE_IMAGE_REGISTRY"); v != "" {
+		mc.ImageRegistry = v
+	}
+	if v := os.Getenv("SCION_MAINTENANCE_IMAGE_TAG"); v != "" {
+		mc.ImageTag = v
+	}
+	if v := os.Getenv("SCION_MAINTENANCE_RUNTIME"); v != "" {
+		mc.RuntimeBin = v
+	}
+	if v := os.Getenv("SCION_MAINTENANCE_REPO_PATH"); v != "" {
+		mc.RepoPath = v
+	}
+	if v := os.Getenv("SCION_MAINTENANCE_BINARY_DEST"); v != "" {
+		mc.BinaryDest = v
+	}
+	if v := os.Getenv("SCION_MAINTENANCE_SERVICE_NAME"); v != "" {
+		mc.ServiceName = v
+	}
+
+	return mc
 }

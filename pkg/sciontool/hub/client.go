@@ -577,6 +577,11 @@ type GitHubTokenRefreshConfig struct {
 	RefreshAt time.Time
 	// TokenPath is the file path to write the refreshed token to.
 	TokenPath string
+	// ChownUID and ChownGID set ownership on the token file after writing.
+	// When ChownUID > 0, the file is chowned so non-root users (e.g. the
+	// scion container user) can read it. Zero values skip chown.
+	ChownUID int
+	ChownGID int
 	// Timeout is the context timeout for each refresh request.
 	Timeout time.Duration
 	// OnRefreshed is called when the token is successfully refreshed.
@@ -639,6 +644,12 @@ func (c *Client) StartGitHubTokenRefresh(ctx context.Context, config *GitHubToke
 				if writeErr := WriteGitHubTokenFile(config.TokenPath, newToken); writeErr != nil {
 					if config.OnError != nil {
 						config.OnError(fmt.Errorf("failed to write GitHub token file: %w", writeErr))
+					}
+				} else if config.ChownUID > 0 {
+					if chownErr := os.Chown(config.TokenPath, config.ChownUID, config.ChownGID); chownErr != nil {
+						if config.OnError != nil {
+							config.OnError(fmt.Errorf("failed to chown GitHub token file: %w", chownErr))
+						}
 					}
 				}
 			}

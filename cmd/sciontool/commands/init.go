@@ -232,7 +232,7 @@ func runInit(args []string) int {
 	}
 
 	// Clone git workspace if configured (hub-first git groves)
-	if err := gitCloneWorkspace(targetUID, targetGID); err != nil {
+	if err := gitCloneWorkspace(targetUID, targetGID, agentHome); err != nil {
 		log.Error("Git clone failed: %v", err)
 
 		// Update local agent-info.json to error state so local status readers
@@ -472,13 +472,20 @@ func runInit(args []string) int {
 		if hub.IsGitHubAppEnabled() && hubClient != nil && hubClient.IsConfigured() {
 			tokenPath := hub.GitHubTokenPath()
 
-			// Write the initial token to the token file so consumers can read it
+			// Write the initial token to the token file so consumers can read it.
+			// Init runs as root, so chown the file to the scion user so the
+			// credential helper (which runs as the scion user) can read it.
 			initialToken := os.Getenv("GITHUB_TOKEN")
 			if initialToken != "" {
 				if err := hub.WriteGitHubTokenFile(tokenPath, initialToken); err != nil {
 					log.Error("Failed to write initial GitHub token file: %v", err)
 				} else {
 					log.Info("Wrote initial GitHub token to %s", tokenPath)
+					if targetUID > 0 {
+						if err := os.Chown(tokenPath, targetUID, targetGID); err != nil {
+							log.Error("Failed to chown GitHub token file to UID=%d: %v", targetUID, err)
+						}
+					}
 				}
 			}
 
@@ -513,6 +520,8 @@ func runInit(args []string) int {
 						ghTokenRefreshDone = hubClient.StartGitHubTokenRefresh(ghTokenRefreshCtx, &hub.GitHubTokenRefreshConfig{
 							RefreshAt: ghRefreshAt,
 							TokenPath: tokenPath,
+							ChownUID:  targetUID,
+							ChownGID:  targetGID,
 							OnRefreshed: func(newToken string, newExpiry time.Time) {
 								log.Info("GitHub token refreshed, new expiry: %s", newExpiry.Format(time.RFC3339))
 							},
@@ -940,8 +949,10 @@ func isUIDMapped(uid int) bool {
 // is set. This supports hub-first git groves where the repository must be cloned
 // before the harness starts. When uid > 0, all git commands run as the specified
 // user so that the resulting files are owned by the scion user rather than root.
+// agentHome is the scion user's home directory, used to write the credential
+// helper to the correct .gitconfig (not root's HOME).
 // Returns nil if no clone URL is configured (non-git workspace).
-func gitCloneWorkspace(uid, gid int) error {
+func gitCloneWorkspace(uid, gid int, agentHome string) error {
 	cloneURL := os.Getenv("SCION_GIT_CLONE_URL")
 	if cloneURL == "" {
 		return nil
@@ -1121,16 +1132,22 @@ func gitCloneWorkspace(uid, gid int) error {
 		}
 	}
 
-	// Configure credential helper in the user's $HOME/.gitconfig (not the
-	// workspace .git/config). This keeps credentials out of the workspace,
-	// matching the pattern used by shared-workspace groves. When GitHub App
-	// token refresh is enabled, use sciontool's credential-helper command
-	// which handles on-demand token refresh from the Hub.
-	agentHomeDir := os.Getenv("HOME")
-	if agentHomeDir == "" {
-		agentHomeDir = "/home/scion"
+	// Sanitize the remote URL to remove the embedded token. The token was
+	// needed for the initial fetch, but ongoing auth is handled by the
+	// credential helper configured below. Leaving the token in the URL
+	// exposes it via `git remote -v`.
+	sanitizeCmd := exec.Command("git", "-C", workspacePath, "remote", "set-url", "origin", buildAuthenticatedURL(cloneURL, ""))
+	setupGitCmd(sanitizeCmd)
+	if out, err := sanitizeCmd.CombinedOutput(); err != nil {
+		log.Error("Failed to sanitize remote URL: %s %v", string(out), err)
 	}
-	gitconfigPath := filepath.Join(agentHomeDir, ".gitconfig")
+
+	// Configure credential helper in the agent user's $HOME/.gitconfig (not
+	// the workspace .git/config). This keeps credentials out of the workspace,
+	// matching the pattern used by shared-workspace groves. We use the
+	// resolved agentHome rather than os.Getenv("HOME") because init runs as
+	// root (HOME=/root) but the harness runs as the scion user.
+	gitconfigPath := filepath.Join(agentHome, ".gitconfig")
 
 	var credentialHelper string
 	if os.Getenv("SCION_GITHUB_APP_ENABLED") == "true" {
